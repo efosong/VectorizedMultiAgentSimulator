@@ -4,10 +4,10 @@
 from ctypes import byref
 from typing import List, Tuple, Callable
 
-import gym
+import gymnasium
 import numpy as np
 import torch
-from gym import spaces
+from gymnasium import spaces
 from torch import Tensor
 
 import vmas.simulator.utils
@@ -48,10 +48,10 @@ class Environment(TorchVectorizedObject):
         self.reset()
 
         # configure spaces
-        self.action_space = gym.spaces.Tuple(
+        self.action_space = gymnasium.spaces.Tuple(
             [self.get_action_space(agent) for agent in self.agents]
         )
-        self.observation_space = gym.spaces.Tuple(
+        self.observation_space = gymnasium.spaces.Tuple(
             [
                 spaces.Box(
                     low=-float("inf"),
@@ -157,11 +157,20 @@ class Environment(TorchVectorizedObject):
             # A dictionary per agent
             infos.append(self.scenario.info(agent))
 
-        dones = self.scenario.done().clone()
-
+        terminated = self.scenario.done().clone()
         self.steps += 1
         if self.max_steps is not None:
-            dones += self.steps >= self.max_steps
+            truncated = self.steps > self.max_steps
+        else:
+            truncated = 0 * self.steps > 1
+        terminations = [terminated for _ in self.agents]
+        truncations = [truncated for _ in self.agents]
+        dones = (terminated | truncated)
+        for env_idx, done in enumerate(dones):
+            if done:
+                reset_obs = self.reset_at(env_idx)
+                for ag_idx in range(len(obs)):
+                    obs[ag_idx][env_idx] = reset_obs[ag_idx]
 
         # print("\nStep results in unwrapped environment")
         # print(
@@ -179,7 +188,7 @@ class Environment(TorchVectorizedObject):
         # )
         # print(f"Dones len (n_envs): {len(dones)}, dones[0] (done env 0): {dones[0]}")
         # print(f"Info len (n_agents): {len(infos)}, info[0] (infos agent 0): {infos[0]}")
-        return obs, rewards, dones, infos
+        return obs, rewards, terminations, truncations, infos
 
     def get_agent_action_size(self, agent: Agent):
         return (

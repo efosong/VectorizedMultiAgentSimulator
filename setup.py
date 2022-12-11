@@ -17,6 +17,6 @@ setup(
         "numpy",
         "torch",
         "pyglet<=1.5.27",
-        "gym<=0.23.1",
+        "gymnasium",
     ],
 )

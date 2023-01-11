@@ -189,23 +189,35 @@ class Scenario(BaseScenario):
         if self.ball_at_feet == "blue":
             idx = torch.randint(len(self.blue_agents), (1,))
             ball_pos = (
-                self.blue_agents[idx].state.pos
+                (self.blue_agents[idx].state.pos
+                 if env_index is None
+                 else self.blue_agents[idx].state.pos[env_index]
+                 )
                 + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )
         elif self.ball_at_feet == "blue_0":
             ball_pos = (
-                self.blue_agents[0].state.pos
+                (self.blue_agents[0].state.pos
+                 if env_index is None
+                 else self.blue_agents[0].state.pos[env_index]
+                 )
                 + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )
         elif self.ball_at_feet == "red":
             idx = torch.randint(len(self.red_agents), (1,))
             ball_pos = (
-                self.red_agents[idx].state.pos
+                (self.red_agents[idx].state.pos
+                 if env_index is None
+                 else self.red_agents[idx].state.pos[env_index]
+                 )
                 - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )
         elif self.ball_at_feet == "red_0":
             ball_pos = (
-                self.red_agents[0].state.pos
+                (self.red_agents[0].state.pos
+                 if env_index is None
+                 else self.red_agents[0].state.pos[env_index]
+                 )
                 - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )
         else:

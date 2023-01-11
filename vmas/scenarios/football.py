@@ -5,6 +5,7 @@
 import math
 import operator
 from functools import reduce
+from collections import defaultdict
 
 import torch
 from vmas.simulator.core import Agent, World, Landmark, Sphere, Box, Line
@@ -25,8 +26,8 @@ class Scenario(BaseScenario):
         return world
 
     def reset_world_at(self, env_index: int = None):
-        self.reset_ball(env_index)
         self.reset_agents(env_index)
+        self.reset_ball(env_index)
         self.reset_background(env_index)
         self.reset_walls(env_index)
         self.reset_goals(env_index)
@@ -50,6 +51,14 @@ class Scenario(BaseScenario):
         self.ball_size = kwargs.get("ball_size", 0.02)
         self.n_traj_points = kwargs.get("n_traj_points", 8)
         self.dense_reward_ratio = kwargs.get("dense_reward_ratio", 0.001)
+        # position boxes
+        #                                     x     y    l     w
+        self.blue_pos = defaultdict(lambda: [-0.3,-1.0, 0.1, 2.0])
+        self.blue_pos.update(kwargs.get("blue_pos", {}))
+        self.red_pos = defaultdict(lambda: [-1.0, -1.0, 1.0, 2.0])
+        self.red_pos.update(kwargs.get("red_pos", {}))
+        self.ball_at_feet = kwargs.get("ball_at_feet", False)
+        self.restrict_half = kwargs.get("restrict_half", False)
 
     def init_world(self, batch_dim: int, device: torch.device):
         # Make world
@@ -105,7 +114,8 @@ class Scenario(BaseScenario):
         world.blue_agents = blue_agents
 
     def reset_agents(self, env_index: int = None):
-        for agent in self.blue_agents:
+        for i, agent in enumerate(self.blue_agents):
+            x,y,l,w = self.blue_pos[i]
             agent.set_pos(
                 torch.rand(
                     (1, self.world.dim_p)
@@ -114,10 +124,11 @@ class Scenario(BaseScenario):
                     device=self.world.device,
                 )
                 * torch.tensor(
-                    [self.pitch_length / 2, self.pitch_width], device=self.world.device
+                    [l*self.pitch_length/2, w*self.pitch_width/2],
+                    device=self.world.device
                 )
                 + torch.tensor(
-                    [-self.pitch_length / 2, -self.pitch_width / 2],
+                    [x*self.pitch_length/2, y*self.pitch_width/2],
                     device=self.world.device,
                 ),
                 batch_index=env_index,
@@ -126,18 +137,23 @@ class Scenario(BaseScenario):
                 torch.zeros(2, device=self.world.device),
                 batch_index=env_index,
             )
-        for agent in self.red_agents:
+        for i, agent in enumerate(self.red_agents):
+            x,y,l,w = self.red_pos[i]
             agent.set_pos(
-                torch.rand(
+                -torch.rand(
                     (1, self.world.dim_p)
                     if env_index is not None
                     else (self.world.batch_dim, self.world.dim_p),
                     device=self.world.device,
                 )
                 * torch.tensor(
-                    [self.pitch_length / 2, self.pitch_width], device=self.world.device
+                    [l*self.pitch_length/2, w*self.pitch_width/2],
+                    device=self.world.device
                 )
-                + torch.tensor([0.0, -self.pitch_width / 2], device=self.world.device),
+                - torch.tensor(
+                    [x*self.pitch_length/2, y*self.pitch_width/2],
+                    device=self.world.device,
+                ),
                 batch_index=env_index,
             )
             agent.set_vel(
@@ -170,8 +186,33 @@ class Scenario(BaseScenario):
         self.ball = ball
 
     def reset_ball(self, env_index: int = None):
+        if self.ball_at_feet == "blue":
+            idx = torch.randint(len(self.blue_agents), (1,))
+            ball_pos = (
+                self.blue_agents[idx].state.pos
+                + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                )
+        elif self.ball_at_feet == "blue_0":
+            ball_pos = (
+                self.blue_agents[0].state.pos
+                + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                )
+        elif self.ball_at_feet == "red":
+            idx = torch.randint(len(self.red_agents), (1,))
+            ball_pos = (
+                self.red_agents[idx].state.pos
+                - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                )
+        elif self.ball_at_feet == "red_0":
+            ball_pos = (
+                self.red_agents[0].state.pos
+                - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                )
+        else:
+            ball_pos = torch.zeros(2, device=self.world.device)
+
         self.ball.set_pos(
-            torch.zeros(2, device=self.world.device),
+            ball_pos,
             batch_index=env_index,
         )
         self.ball.set_vel(
@@ -681,6 +722,12 @@ class Scenario(BaseScenario):
             red_score = over_left_line  # & in_left_goal
             self._sparse_reward = 1 * blue_score - 1 * red_score
             self._done = blue_score | red_score
+            # Out of Play
+            if self.restrict_half:
+                if self.restrict_half=="blue":
+                    self._done = self._done | (self.ball.state.pos[:, 0] > 0)
+                elif self.restrict_half=="red":
+                    self._done = self._done | (self.ball.state.pos[:, 0] < 0)
             # Dense Reward
             red_value = self.red_controller.get_attack_value(self.ball)
             blue_value = self.blue_controller.get_attack_value(self.ball)
@@ -1658,13 +1705,38 @@ class AgentPolicy:
 def interactive():
     from vmas.interactive_rendering import render_interactively
 
+    blue_pos = {
+        #   x     y     l     w
+        # 0: [-0.7,  0.2,  0.1,  0.5],# Left-Back
+        # 1: [-0.7, -0.2,  0.1, -0.5],# Right-Back
+        # 2: [-0.3,  0.2,  0.1,  0.3],# Left-Forward
+        # 3: [-0.3, -0.2,  0.1, -0.3] # Right-Forward
+        0: [ 0.2,  0.2,  0.4,  0.3], # Left-Forward
+        1: [ 0.2, -0.2,  0.4, -0.3] # Right-Forward
+    }
+    red_pos = {
+        #   x     y     l     w
+        # 0: [-0.7,  0.2,  0.1,  0.5],# Left-Back
+        # 1: [-0.7, -0.2,  0.1, -0.5],# Right-Back
+        # 2: [-0.3,  0.2,  0.1,  0.3],# Left-Forward
+        # 3: [-0.3, -0.2,  0.1, -0.3] # Right-Forward
+        0: [-0.7,  0.2,  0.1,  0.5], # Left-Back
+        1: [-0.7, -0.2,  0.1, -0.5] # Right-Back
+    }
+
     render_interactively(
         __file__,
         control_two_agents=True,
         continuous=True,
-        n_blue_agents=3,
-        n_red_agents=3,
+        n_blue_agents=2,
+        n_red_agents=2,
+        blue_pos=blue_pos,
+        red_pos=red_pos,
         dense_reward_ratio=0.001,
+        pitch_length=2,
+        pitch_width=1,
+        ball_at_feet=False,
+        restrict_half=False
     )
 
 

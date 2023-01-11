@@ -59,6 +59,10 @@ class Scenario(BaseScenario):
         self.red_pos.update(kwargs.get("red_pos", {}))
         self.ball_at_feet = kwargs.get("ball_at_feet", False)
         self.restrict_half = kwargs.get("restrict_half", False)
+        # observation_mode
+        self.obs_mode = kwargs.get("obs_mode", "full")
+        self.max_blue_agents = kwargs.get("max_n_blue_agents", self.n_blue_agents)
+        self.max_red_agents = kwargs.get("max_n_red_agents", self.n_red_agents)
 
     def init_world(self, batch_dim: int, device: torch.device):
         # Make world
@@ -751,6 +755,13 @@ class Scenario(BaseScenario):
         return self._reward
 
     def observation(self, agent: Agent):
+        if self.obs_mode == "ego_only":
+            return self._ego_only_obs(agent)
+        else:
+            return self._all_player_obs(agent)
+
+    def _ego_only_obs(self, agent: Agent):
+        import pdb; pdb.set_trace()
         obs = torch.cat(
             [
                 agent.state.pos,
@@ -761,6 +772,57 @@ class Scenario(BaseScenario):
             dim=1,
         )
         return obs
+
+    def _all_player_obs(self, agent: Agent):
+        blue_agents_to_fill = self.max_blue_agents
+        red_agents_to_fill = self.max_red_agents
+        ### Blue Team
+        obs = [
+                agent.state.pos,
+                agent.state.vel,
+                ]
+        blue_agents_to_fill -= 1
+        for blue_agent in self.world.blue_agents:
+            if agent is blue_agent:
+                continue
+            obs.extend(
+                [
+                    blue_agent.state.pos - agent.state.pos,
+                    blue_agent.state.vel - agent.state.vel,
+                ]
+            )
+            blue_agents_to_fill -= 1
+        for _ in range(blue_agents_to_fill):
+            obs.extend(
+                [
+                    0 * agent.state.pos,
+                    0 * agent.state.vel,
+                ]
+            )
+        ### Red Team
+        for red_agent in self.world.red_agents:
+            obs.extend(
+                [
+                    red_agent.state.pos - agent.state.pos,
+                    red_agent.state.vel - agent.state.vel,
+                ]
+            )
+            red_agents_to_fill -= 1
+        for _ in range(red_agents_to_fill):
+            obs.extend(
+                [
+                    0 * agent.state.pos,
+                    0 * agent.state.vel,
+                ]
+            )
+        ### ball
+        obs.extend(
+            [
+                self.ball.state.pos - agent.state.pos,
+                self.ball.state.vel - agent.state.vel,
+            ]
+        )
+        return torch.cat(obs, dim=1)
 
     def done(self):
         if self.ai_blue_agents and self.ai_red_agents:

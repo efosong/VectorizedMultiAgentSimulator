@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import math
@@ -81,7 +81,7 @@ class Scenario(BaseScenario):
 
         # Add agents
         agent = Agent(
-            name=f"agent 0",
+            name="agent 0",
             shape=Sphere(self.agent_radius),
             u_multiplier=0.8,
             obs_noise=self.obs_noise,
@@ -89,7 +89,7 @@ class Scenario(BaseScenario):
         )
         world.add_agent(agent)
         agent = Agent(
-            name=f"agent 1",
+            name="agent 1",
             shape=Sphere(self.agent_radius),
             u_multiplier=0.8,
             mass=1 if self.asym_package else self.mass_ratio,
@@ -141,6 +141,9 @@ class Scenario(BaseScenario):
             )
             world.add_joint(joint)
 
+        self.rot_rew = torch.zeros(batch_dim, device=device)
+        self.energy_rew = self.rot_rew.clone()
+
         return world
 
     def reset_world_at(self, env_index: int = None):
@@ -154,11 +157,9 @@ class Scenario(BaseScenario):
         )
 
         start_delta_x = (self.joint_length / 2) * torch.cos(start_angle)
-        start_delta_x_abs = start_delta_x.abs()
         min_x_start = 0
         max_x_start = 0
         start_delta_y = (self.joint_length / 2) * torch.sin(start_angle)
-        start_delta_y_abs = start_delta_y.abs()
         min_y_start = 0
         max_y_start = 0
 
@@ -206,7 +207,6 @@ class Scenario(BaseScenario):
             )
 
         if env_index is None:
-
             self.joint.rot_shaping_pre = (
                 get_line_angle_dist_0_180(
                     self.joint.landmark.state.rot, self.goal_angle
@@ -215,7 +215,6 @@ class Scenario(BaseScenario):
             )
 
         else:
-
             self.joint.rot_shaping_pre[env_index] = (
                 get_line_angle_dist_0_180(
                     self.joint.landmark.state.rot[env_index], self.goal_angle
@@ -227,10 +226,7 @@ class Scenario(BaseScenario):
         is_first = agent == self.world.agents[0]
 
         if is_first:
-            self.rew = torch.zeros(
-                self.world.batch_dim, device=self.world.device, dtype=torch.float32
-            )
-            self.rot_rew = self.rew.clone()
+            self.rot_rew[:] = 0
 
             # Rot shaping
             joint_dist_to_90_rot = get_line_angle_dist_0_180(
@@ -274,7 +270,10 @@ class Scenario(BaseScenario):
         ] + ([angle_to_vector(joint_angle)] if self.observe_joint_angle else [])
 
         for i, obs in enumerate(observations):
-            noise = torch.zeros(*obs.shape, device=self.world.device,).uniform_(
+            noise = torch.zeros(
+                *obs.shape,
+                device=self.world.device,
+            ).uniform_(
                 -self.obs_noise,
                 self.obs_noise,
             )

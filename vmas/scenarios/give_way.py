@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import math
@@ -9,7 +9,7 @@ from vmas import render_interactively
 from vmas.simulator.core import Agent, World, Landmark, Sphere, Line, Box
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, TorchUtils
-from vmas.simulator.velocity_controller import VelocityController
+from vmas.simulator.controllers.velocity_controller import VelocityController
 
 
 class Scenario(BaseScenario):
@@ -20,6 +20,7 @@ class Scenario(BaseScenario):
         self.box_agents = kwargs.get("box_agents", False)
         self.linear_friction = kwargs.get("linear_friction", 0.1)
         self.mirror_passage = kwargs.get("mirror_passage", False)
+        self.done_on_completion = kwargs.get("done_on_completion", False)
 
         # Reward params
         self.pos_shaping_factor = kwargs.get("pos_shaping_factor", 1.0)
@@ -121,6 +122,14 @@ class Scenario(BaseScenario):
 
         self.spawn_map(world)
 
+        for agent in world.agents:
+            agent.energy_rew = torch.zeros(batch_dim, device=device)
+            agent.agent_collision_rew = agent.energy_rew.clone()
+            agent.obstacle_collision_rew = agent.agent_collision_rew.clone()
+
+        self.pos_rew = torch.zeros(batch_dim, device=device)
+        self.final_rew = self.pos_rew.clone()
+
         return world
 
     def reset_world_at(self, env_index: int = None):
@@ -130,7 +139,10 @@ class Scenario(BaseScenario):
                 dtype=torch.float32,
                 device=self.world.device,
             )
-            + torch.zeros(self.world.dim_p, device=self.world.device,).uniform_(
+            + torch.zeros(
+                self.world.dim_p,
+                device=self.world.device,
+            ).uniform_(
                 -self.spawn_pos_noise,
                 self.spawn_pos_noise,
             ),
@@ -152,7 +164,10 @@ class Scenario(BaseScenario):
                 dtype=torch.float32,
                 device=self.world.device,
             )
-            + torch.zeros(self.world.dim_p, device=self.world.device,).uniform_(
+            + torch.zeros(
+                self.world.dim_p,
+                device=self.world.device,
+            ).uniform_(
                 -self.spawn_pos_noise,
                 self.spawn_pos_noise,
             ),
@@ -187,11 +202,11 @@ class Scenario(BaseScenario):
                 )
 
         if env_index is None:
-            self.reached_goal = torch.full(
+            self.goal_reached = torch.full(
                 (self.world.batch_dim,), False, device=self.world.device
             )
         else:
-            self.reached_goal[env_index] = False
+            self.goal_reached[env_index] = False
 
     def process_action(self, agent: Agent):
         if self.use_velocity_controller:
@@ -222,10 +237,8 @@ class Scenario(BaseScenario):
         green_agent = self.world.agents[-1]
 
         if is_first:
-            self.pos_rew = torch.zeros(
-                self.world.batch_dim, device=self.world.device, dtype=torch.float32
-            )
-            self.final_rew = torch.zeros(self.world.batch_dim, device=self.world.device)
+            self.pos_rew[:] = 0
+            self.final_rew[:] = 0
 
             self.blue_distance = torch.linalg.vector_norm(
                 blue_agent.state.pos - blue_agent.goal.state.pos,
@@ -251,14 +264,9 @@ class Scenario(BaseScenario):
             self.pos_rew += self.green_rew
 
             self.final_rew[self.goal_reached] = self.final_reward
-            self.reached_goal += self.goal_reached
 
-        agent.agent_collision_rew = torch.zeros(
-            (self.world.batch_dim,), device=self.world.device
-        )
-        agent.obstacle_collision_rew = torch.zeros(
-            (self.world.batch_dim,), device=self.world.device
-        )
+        agent.agent_collision_rew[:] = 0
+        agent.obstacle_collision_rew[:] = 0
         for a in self.world.agents:
             if a != agent:
                 agent.agent_collision_rew[
@@ -302,7 +310,10 @@ class Scenario(BaseScenario):
 
         if self.obs_noise > 0:
             for i, obs in enumerate(observations):
-                noise = torch.zeros(*obs.shape, device=self.world.device,).uniform_(
+                noise = torch.zeros(
+                    *obs.shape,
+                    device=self.world.device,
+                ).uniform_(
                     -self.obs_noise,
                     self.obs_noise,
                 )
@@ -322,7 +333,6 @@ class Scenario(BaseScenario):
         }
 
     def spawn_map(self, world: World):
-
         self.scenario_length = 5
         self.passage_length = 0.4
         self.passage_width = 0.48  # box obstacle length
@@ -526,6 +536,12 @@ class Scenario(BaseScenario):
                 ),
                 batch_index=env_index,
             )
+
+    def done(self):
+        if self.done_on_completion:
+            return self.goal_reached
+        else:
+            return torch.zeros_like(self.goal_reached)
 
 
 if __name__ == "__main__":

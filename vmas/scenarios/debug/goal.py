@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import math
@@ -11,7 +11,7 @@ from vmas import render_interactively
 from vmas.simulator.core import Agent, World, Landmark, Sphere
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, TorchUtils
-from vmas.simulator.velocity_controller import VelocityController
+from vmas.simulator.controllers.velocity_controller import VelocityController
 
 
 class Scenario(BaseScenario):
@@ -64,7 +64,7 @@ class Scenario(BaseScenario):
         world.add_landmark(self.goal)
         # Add agents
         agent = Agent(
-            name=f"agent 0",
+            name="agent 0",
             collide=True,
             color=Color.GREEN,
             render_action=True,
@@ -77,7 +77,11 @@ class Scenario(BaseScenario):
             agent, world, controller_params, "standard"
         )
         agent.goal = self.goal
+        agent.energy_rew = torch.zeros(batch_dim, device=device)
         world.add_agent(agent)
+
+        self.pos_rew = torch.zeros(batch_dim, device=device)
+        self.time_rew = self.pos_rew.clone()
 
         return world
 
@@ -189,8 +193,8 @@ class Scenario(BaseScenario):
         is_first = agent == self.world.agents[0]
 
         if is_first:
-            self.pos_rew = torch.zeros(self.world.batch_dim, device=self.world.device)
-            self.time_rew = torch.zeros(self.world.batch_dim, device=self.world.device)
+            self.pos_rew[:] = 0
+            self.time_rew[:] = 0
 
             # Pos shaping
             goal_dist = torch.stack(
@@ -232,7 +236,10 @@ class Scenario(BaseScenario):
 
         if self.obs_noise > 0:
             for i, obs in enumerate(observations):
-                noise = torch.zeros(*obs.shape, device=self.world.device,).uniform_(
+                noise = torch.zeros(
+                    *obs.shape,
+                    device=self.world.device,
+                ).uniform_(
                     -self.obs_noise,
                     self.obs_noise,
                 )

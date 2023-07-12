@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 
@@ -23,6 +23,7 @@ class Scenario(BaseScenario):
         self.init_walls(world)
         self.init_goals(world)
         # self.init_traj_pts(world)
+        self._done = torch.zeros(batch_dim, device=device, dtype=torch.bool)
         return world
 
     def reset_world_at(self, env_index: int = None):
@@ -32,6 +33,10 @@ class Scenario(BaseScenario):
         self.reset_walls(env_index)
         self.reset_goals(env_index)
         self.reset_controllers(env_index)
+        if env_index is None:
+            self._done[:] = False
+        else:
+            self._done[env_index] = False
 
     def init_params(self, **kwargs):
         self.viewer_size = kwargs.get("viewer_size", (1200, 800))
@@ -369,7 +374,6 @@ class Scenario(BaseScenario):
                 )
 
     def init_walls(self, world):
-
         right_top_wall = Landmark(
             name="Right Top Wall",
             collide=True,
@@ -1775,7 +1779,6 @@ class AgentPolicy:
 
 """ Run """
 
-
 def interactive():
     from vmas.interactive_rendering import render_interactively
 
@@ -1812,57 +1815,6 @@ def interactive():
         ball_at_feet=False,
         restrict_half=False
     )
-
-
-def multiple_envs():
-    from vmas import make_env
-
-    scenario_name = "football"
-
-    # Scenario specific variables
-    env_args = {
-        "n_blue_agents": 2,
-        "n_red_agents": 2,
-        "ai_red_agents": True,
-        "ai_blue_agents": True,
-    }
-
-    num_envs = 64
-    render_env = 0
-    device = "cpu"
-    n_steps = 10000
-
-    action = [0.0, 0.0]
-
-    env = make_env(
-        scenario_name=scenario_name,
-        num_envs=num_envs,
-        device=device,
-        continuous_actions=True,
-        # Environment specific variables
-        **env_args,
-    )
-
-    step = 0
-    n_agents = 0  # env_args["n_blue_agents"]
-    for s in range(n_steps):
-        actions = []
-        step += 1
-        for i in range(n_agents):
-            actions.append(
-                torch.tensor(
-                    action,
-                    device=device,
-                ).repeat(num_envs, 1)
-            )
-        obs, rews, dones, info = env.step(actions)
-        env.render(
-            mode="rgb_array",
-            agent_index_focus=None,
-            visualize_when_rgb=True,
-            env_index=render_env,
-        )
-
 
 if __name__ == "__main__":
     interactive()

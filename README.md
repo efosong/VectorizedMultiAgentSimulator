@@ -1,4 +1,9 @@
 # VectorizedMultiAgentSimulator (VMAS)
+<a href="https://pypi.org/project/vmas"><img src="https://img.shields.io/pypi/v/vmas" alt="pypi version"></a>
+[![Downloads](https://static.pepy.tech/personalized-badge/vmas?period=total&units=international_system&left_color=grey&right_color=blue&left_text=Downloads)](https://pepy.tech/project/vmas)
+![tests](https://github.com/proroklab/VectorizedMultiAgentSimulator/actions/workflows/python-app.yml/badge.svg)
+[![Python](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10-blue.svg)](https://www.python.org/downloads/)
+[![GitHub license](https://img.shields.io/badge/license-GPLv3.0-blue.svg)](https://github.com/proroklab/VectorizedMultiAgentSimulator/blob/main/LICENSE)
 
 <p align="center">
 <img src="https://github.com/matteobettini/vmas-media/blob/main/media/VMAS_scenarios.gif?raw=true" alt="drawing"/>  
@@ -14,7 +19,7 @@ Scenario creation is made simple and modular to incentivize contributions.
 VMAS simulates agents and landmarks of different shapes and supports rotations, elastic collisions, joints, and custom gravity.
 Holonomic motion models are used for the agents to simplify simulation. Custom sensors such as LIDARs are available and the simulator supports inter-agent communication.
 Vectorization in [PyTorch](https://pytorch.org/) allows VMAS to perform simulations in a batch, seamlessly scaling to tens of thousands of parallel environments on accelerated hardware.
-VMAS has an interface compatible with [OpenAI Gym](https://github.com/openai/gym) and with the [RLlib](https://docs.ray.io/en/latest/rllib/index.html) library, enabling out-of-the-box integration with a wide range of RL algorithms. 
+VMAS has an interface compatible with [OpenAI Gym](https://github.com/openai/gym), with [RLlib](https://docs.ray.io/en/latest/rllib/index.html) and with [torchrl](https://github.com/pytorch/rl), enabling out-of-the-box integration with a wide range of RL algorithms. 
 The implementation is inspired by [OpenAI's MPE](https://github.com/openai/multiagent-particle-envs). 
 Alongside VMAS's scenarios, we port and vectorize all the scenarios in MPE.
 
@@ -56,16 +61,22 @@ Watch the talk at DARS 2022 about VMAS.
     + [Install](#install)
     + [Run](#run)
       - [RLlib](#rllib)
+      - [TorchRL](#torchrl)
+    + [Input and output spaces](#input-and-output-spaces)
+      - [Output spaces](#output-spaces)
+      - [Input action space](#input-action-space)
   * [Simulator features](#simulator-features)
   * [Creating a new scenario](#creating-a-new-scenario)
   * [Play a scenario](#play-a-scenario)
   * [Rendering](#rendering)
+    + [Plot function under rendering](#plot-function-under-rendering)
     + [Rendering on server machines](#rendering-on-server-machines)
   * [List of environments](#list-of-environments)
     + [VMAS](#vmas)
        - [Main scenarios](#main-scenarios)
        - [Debug scenarios](#debug-scenarios)
     + [MPE](#mpe)
+  * [Our papers using VMAS](#our-papers-using-vmas)
   * [TODOS](#todos)
 
 
@@ -89,9 +100,20 @@ git clone https://github.com/proroklab/VectorizedMultiAgentSimulator.git
 cd VectorizedMultiAgentSimulator
 pip install -e .
 ```
-By default, rllib is an optional requirement, if you want to install it, you can use:
+By default, vmas has only the core requirements. Here are some optional packages you may want to install:
 ```
-pip install "ray[rllib]"==2.1 # We support versions "ray[rllib]<=2.1,>=1.13"
+# Training
+pip install "ray[rllib]"==2.1.0 # We support versions "ray[rllib]<=2.2,>=1.13"
+pip install torchrl
+
+# Logging
+pip installl wandb 
+
+# Save renders
+pip install opencv-python moviepy
+
+# Tests
+pip install pytest pyyaml pytest-instafail tqdm
 ```
 
 ### Run 
@@ -104,12 +126,15 @@ object with the OpenAI gym interface:
 Here is an example:
 ```
  env = vmas.make_env(
-        scenario_name="waterfall",
+        scenario="waterfall", # can be scenario name or BaseScenario class
         num_envs=32,
         device="cpu", # Or "cuda" for GPU
         continuous_actions=True,
         wrapper=None,  # One of: None, vmas.Wrapper.RLLIB, and vmas.Wrapper.GYM
         max_steps=None, # Defines the horizon. None is infinite horizon.
+        seed=None, # Seed of the environment
+        dict_spaces=False, # By default tuple spaces are used with each element in the tuple being an agent.
+        # If dict_spaces=True, the spaces will become Dict with each key being the agent's name
         **kwargs # Additional arguments you want to pass to the scenario initialization
     )
 ```
@@ -119,13 +144,75 @@ A further example that you can run is contained in `use_vmas_env.py` in the `exa
 
 To see how to use VMAS in RLlib, check out the script in `examples/rllib.py`.
 
+You can find more examples of multi-agent training in VMAS in the [HetGPPO repository](https://github.com/proroklab/HetGPPO).
+
+#### TorchRL
+
+VMAS is supported by torchrl and can be used with a wide selection of algorithms.
+See [here](https://github.com/pytorch/rl/pull/1027) for some example scripts.
+
+### Input and output spaces
+
+VMAS uses gym spaces for input and output spaces. 
+By default, action and observation spaces are tuples:
+```python
+spaces.Tuple(
+    [agent_space for agent in agents]
+)
+```
+When creating the environment,  by setting `dict_spaces=True`, tuples can be changed to dictionaries:
+```python
+spaces.Dict(
+  {agent.name: agent_space for agent in agents}
+)
+```
+
+#### Output spaces
+
+If `dict_spaces=False`, observations, infos, and rewards returned by the environment will be a list with each element being the value for that agent.
+
+If `dict_spaces=True`, observations, infos, and rewards returned by the environment will be a dictionary with each element having key = agent_name and value being the value for that agent.
+
+Each agent **observation** in either of these structures is either (depending on how you implement the scenario):
+  - a tensor with shape `[num_envs, observation_size]`, where `observation_size` is the size of the agent's observation.
+```python
+ def observation(self, agent: Agent):
+        return torch.cat([agent.state.pos, agent.state.vel], dim=-1)
+```
+  - a dictionary of such tensors
+```python
+ def observation(self, agent: Agent):
+        return {
+            "pos": agent.state.pos,
+            "nested": {"vel": agent.state.vel},
+        }
+```
+
+Each agent **reward** in either of these structures is a tensor with shape `[num_envs]`.
+
+Each agent **info** in either of these structures is a dictionary where each entry has key representing the name of that info and value a tensor with shape `[num_envs, info_size]`, where `info_size` is the size of that info for that agent.
+
+Done is a tensor of shape `[num_envs]`.
+
+
+#### Input action space
+  
+Each agent in vmas has to provide an action tensor with shape `[num_envs, action_size]`, where `num_envs` is the number of vectorized environments and `action_size` is the size of the agent's action.
+
+The agents' actions can be provided to the `env.step()` in two ways:
+- A **List** of length equal to the number of agents which looks like `[tensor_action_agent_0, ..., tensor_action_agent_n]`
+- A **Dict** of length equal to the number of agents and with each entry looking like `{agent_0.name: tensor_action_agent_0, ..., agent_n.name: tensor_action_agent_n}`
+
+Users can interchangeably use either of the two formats and even change formats during execution, vmas will always perform all sanity checks. 
+Each format will work regardless of the fact that tuples or dictionary spaces have been chosen.
+
 ## Simulator features
 
 - **Vectorized**: VMAS vectorization can step any number of environments in parallel. This significantly reduces the time needed to collect rollouts for training in MARL.
 - **Simple**: Complex vectorized physics engines exist (e.g., [Brax](https://github.com/google/brax)), but they do not scale efficiently when dealing with multiple agents. This defeats the computational speed goal set by vectorization. VMAS uses a simple custom 2D dynamics engine written in PyTorch to provide fast simulation. 
 - **General**: The core of VMAS is structured so that it can be used to implement general high-level multi-robot problems in 2D. It can support adversarial as well as cooperative scenarios. Holonomic point-robot simulation has been chosen to focus on general high-level problems, without learning low-level custom robot controls through MARL.
 - **Extensible**: VMAS is not just a simulator with a set of environments. It is a framework that can be used to create new multi-agent scenarios in a format that is usable by the whole MARL community. For this purpose, we have modularized the process of creating a task and introduced interactive rendering to debug it. You can define your own scenario in minutes. Have a look at the dedicated section in this document.
-- **Compatible**: VMAS has wrappers for [RLlib](https://docs.ray.io/en/latest/rllib/index.html) and [OpenAI Gym](https://github.com/openai/gym). RLlib has a large number of already implemented RL algorithms.
+- **Compatible**: VMAS has wrappers for [RLlib](https://docs.ray.io/en/latest/rllib/index.html), [torchrl](https://pytorch.org/rl/reference/generated/torchrl.envs.libs.vmas.VmasEnv.html), and [OpenAI Gym](https://github.com/openai/gym). RLlib and torchrl have a large number of already implemented RL algorithms.
 Keep in mind that this interface is less efficient than the unwrapped version. For an example of wrapping, see the main of `make_env`.
 - **Tested**: Our scenarios come with tests which run a custom designed heuristic on each scenario.
 - **Entity shapes**: Our entities (agent and landmarks) can have different customizable shapes (spheres, boxes, lines).
@@ -139,7 +226,9 @@ customizable. Examples are: drag, friction, gravity, simulation timestep, non-di
 - **Sensors**: Our simulator implements ray casting, which can be used to simulate a wide range of distance-based sensors that can be added to agents. We currently support LIDARs. To see available sensors, have a look at the `sensors` script.
 - **Joints**: Our simulator supports joints. Joints are constraints that keep entities at a specified distance. The user can specify the anchor points on the two objects, the distance (including 0), the thickness of the joint, if the joint is allowed to rotate at either anchor point, and if he wants the joint to be collidable. Have a look at the waterfall scenario to see how you can use joints. See the `waterfall` and `joint_passage` scenarios for an example.
 - **Agent actions**: Agents' physical actions are 2D forces for holonomic motion. Agent rotation can also be controlled through a torque action (activated by setting `agent.action.u_rot_range` at agent creation time). Agents can also be equipped with continuous or discrete communication actions.
-- **Action preprocessing and velocity controller**: By implementing the `process_action` function of a scenario, you can modify the agents' actions before they are passed to the simulator. This can be used to enforce a specific dynamics model (e.g., differential drive). We provide a `VelocityController` which can be used in this function to treat input actions as velocities (instead of forces). This PID controller takes velocities and outputs the forces which are fed to the simulator. See the `vel_control` debug scenario for an example.
+- **Action preprocessing**: By implementing the `process_action` function of a scenario, you can modify the agents' actions before they are passed to the simulator. This is used in `controllers` (where we provide different types of controllers to use) and `dynamics` (where we provide custom robot dynamic models).
+- **Controllers**: Controllers are components that can be appended to the neural network policy or replace it completely.  We provide a `VelocityController` which can be used to treat input actions as velocities (instead of default vmas input forces). This PID controller takes velocities and outputs the forces which are fed to the simulator. See the `vel_control` debug scenario for an example.
+- **Dynamic models**: VMAS simulates holonomic dynamics models by default. Custom dynamic constraints can be enforced in an action preprocessing step. We implement `DiffDriveDynamics`, which can be used to simulate differential drive robots. See the `diff_drive` debug scenario for an example.
 
 ## Creating a new scenario
 
@@ -158,6 +247,7 @@ You can play with a scenario interactively! **Just execute its script!**
 Just use the `render_interactively` function in the `interactive_rendering.py` script. Relevant values will be plotted to screen.
 Move the agent with the arrow keys and switch agents with TAB. You can reset the environment by pressing R.
 If you have more than 1 agent, you can control another one with W,A,S,D and switch the second agent using LSHIFT. To do this, just set `control_two_agents=True`.
+If the agents also have rotational actions, you can control them with M,N for the first agent and with Q,E (for example in the `diff_drive` scenario).
 
 On the screen you will see some data from the agent controlled with arrow keys. This data includes: name, current obs, 
 current reward, total reward so far and environment done flag.
@@ -179,7 +269,6 @@ env.render(
     agent_index_focus=4, # If None keep all agents in camera, else focus camera on specific agent
     index=0, # Index of batched environment to render
     visualize_when_rgb: bool = False, # Also run human visualization when mode=="rgb_array"
-    plot_position_function=None, # A function to plot under the rendering. This function takes the position (x,y) as input and outputs a transparency alpha value. This can be used to visualize a value function.
 )
 ```
 
@@ -190,6 +279,23 @@ You can also change the viewer size, zoom, and enable a background rendered grid
 |        <img src="https://github.com/matteobettini/vmas-media/blob/main/media/vmas_simple.gif?raw=true" alt="drawing" width="260"/>        | With ` agent_index_focus=None` the camera keeps focus on all agents |
 | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/vmas_simple_focus_agent_0.gif?raw=true" alt="drawing" width="260"/> |       With ` agent_index_focus=0` the camera follows agent 0        |
 | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/vmas_simple_focus_agent_4.gif?raw=true" alt="drawing" width="260"/> |       With ` agent_index_focus=4` the camera follows agent 4        |
+### Plot function under rendering 
+
+It is possible to plot a function under the rendering of the agents by providing a function `f` to the `render` function.
+```
+env.render(
+    plot_position_function=f
+)
+```
+The function takes a numpy array with shape `(n_points, 2)`, which represents a set of x, y values to evaluate f over for plotting.
+`f` outputs either an array with shape `(n_points, 1)`, which will be plotted as a colormap,
+or an array with shape `(n_points, 4)`, which will be plotted as RGBA values.
+
+See the `sampling.py` scenario for more info.
+
+<p align="center">
+<img src="https://github.com/matteobettini/vmas-media/blob/main/media/render_function.png?raw=true"  alt="drawing" width="400"/>
+</p>
 
 ### Rendering on server machines
 To render in machines without a display use `mode="rgb_array"`. Make sure you have OpenGL and Pyglet installed.
@@ -207,14 +313,15 @@ To create a fake screen you need to have `Xvfb` installed.
 
 ## List of environments
 ### VMAS
-|                                                                                                                                                                         |                                                                                                                                                               |                                                                                                                                                                           |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **<p align="center">dropout</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/dropout.gif?raw=true"/>                         | **<p align="center">football</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/football.gif?raw=true"/>             | **<p align="center">transport</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/transport.gif?raw=true"/>                       |
-| **<p align="center">wheel</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/wheel.gif?raw=true"/>                             | **<p align="center">balance</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/balance.gif?raw=true"/>               | **<p align="center">reverse <br/> transport</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/reverse_transport.gif?raw=true"/> |
-| **<p align="center">give_way</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/give_way.gif?raw=true"/>                       | **<p align="center">passage</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/passage.gif?raw=true"/>               | **<p align="center">dispersion</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/dispersion.gif?raw=true"/>                     |
-| **<p align="center">joint_passage_size</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/joint_passage_size.gif?raw=true"/>   | **<p align="center">flocking</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/flocking.gif?raw=true"/>             | **<p align="center">discovery</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/discovery.gif?raw=true"/>                       | 
-| **<p align="center">joint_passage</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/joint_passage.gif?raw=true"/>             | **<p align="center">ball_passage</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/ball_passage.gif?raw=true"/>     | **<p align="center">ball_trajectory</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/ball_trajectory.gif?raw=true"/>           |
-| **<p align="center">buzz_wire</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/buzz_wire.gif?raw=true"/>                     | **<p align="center">multi_give_way</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/multi_give_way.gif?raw=true"/> |                                                                                                                                                                           |
+|                                                                                                                                                                       |                                                                                                                                                               |                                                                                                                                                                           |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **<p align="center">dropout</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/dropout.gif?raw=true"/>                       | **<p align="center">football</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/football.gif?raw=true"/>             | **<p align="center">transport</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/transport.gif?raw=true"/>                       |
+| **<p align="center">wheel</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/wheel.gif?raw=true"/>                           | **<p align="center">balance</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/balance.gif?raw=true"/>               | **<p align="center">reverse <br/> transport</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/reverse_transport.gif?raw=true"/> |
+| **<p align="center">give_way</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/give_way.gif?raw=true"/>                     | **<p align="center">passage</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/passage.gif?raw=true"/>               | **<p align="center">dispersion</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/dispersion.gif?raw=true"/>                     |
+| **<p align="center">joint_passage_size</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/joint_passage_size.gif?raw=true"/> | **<p align="center">flocking</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/flocking.gif?raw=true"/>             | **<p align="center">discovery</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/discovery.gif?raw=true"/>                       | 
+| **<p align="center">joint_passage</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/joint_passage.gif?raw=true"/>           | **<p align="center">ball_passage</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/ball_passage.gif?raw=true"/>     | **<p align="center">ball_trajectory</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/ball_trajectory.gif?raw=true"/>           |
+| **<p align="center">buzz_wire</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/buzz_wire.gif?raw=true"/>                   | **<p align="center">multi_give_way</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/multi_give_way.gif?raw=true"/> | **<p align="center">navigation</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/navigation.gif?raw=true"/>                     |
+| **<p align="center">sampling</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/sampling.gif?raw=true"/>                     | **<p align="center">wind_flocking</p>** <br/> <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/wind_flocking.gif?raw=true"/>   |                                                                                                                                                                           |
 
 #### Main scenarios
 
@@ -236,7 +343,9 @@ To create a fake screen you need to have `Xvfb` installed.
 | `ball_passage.py`       | This is the same as `joint_passage.py`, except now the agents are not connected by linkages and need to push a ball through the passage. The reward is only dependent on the ball and it's shaped to guide it through the passage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/ball_passage.gif?raw=true" alt="drawing" width="300"/>       |
 | `ball_trajectory.py`    | This is the same as `circle_trajectory.py` except the trajectory reward is now dependent on a ball object. Two agents need to drive the ball in a circular trajectory. If `joints=True` the agents are connected to the ball with linkages.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/ball_trajectory.gif?raw=true" alt="drawing" width="300"/>    |
 | `buzz_wire.py`          | Two agents are connected to a mass through linkages and need to play the [Buzz Wire game](https://en.wikipedia.org/wiki/Wire_loop_game) in a straight corridor. Be careful not to touch the borders, or the episode ends!                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/buzz_wire.gif?raw=true" alt="drawing" width="300"/>          |
-| `multi_give_way.py`     | Like `give_way`, but with four agents. This scenario requires high coordination to be solved.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/multi_give_way.gif?raw=true" alt="drawing" width="300"/>     |
+| `navigation.py`         | Randomly spawned agents need to navigate to their goal. Collisions can be turned on and agents can use LIDARs to avoid running into each other. Rewards can be shared or individual. Apart from position, velocity, and lidar readings, each agent can be set up to observe just the relative distance to its goal, or its relative distance to *all* goals (in this case the task needs heterogeneous behavior to be solved). The scenario can also be set up so that multiple agents share the same goal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/navigation.gif?raw=true" alt="drawing" width="300"/>         |
+| `sampling.py`           | `n_agents` are spawned randomly in a workspace with an underlying gaussian density function composed of `n_gaussians` modes. Agents need to collect samples by moving in this field. The field is discretized to a grid and once an agent visits a cell its sample is collected without replacement and given as reward to the whole team (or just to the agent if `shared_rew=False`). Agents can use a lidar to sens each other. Apart from lidar, position and velocity observations, each agent observes the values of samples in the 3x3 grid around it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/sampling.gif?raw=true" alt="drawing" width="300"/>           |
+| `wind_flocking.py`      | Two agents need to flock at a specified distance northwards. They are rewarded for their distance and the alignment of their velocity vectors to the reference. The scenario presents wind from north to south. The agents present physical heterogeneity: the smaller one has some aerodynamical properties and can shield the bigger one from wind, thus optimizing the flocking performance. Thus, the optimal solution to this task consists in the agents performing heterogeneous wind shielding. See the [SND paper](https://matteobettini.github.io/publication/system-neural-diversity-measuring-behavioral-heterogeneity-in-multi-agent-learning/) for more info.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/wind_flocking.gif?raw=true" alt="drawing" width="300"/>      |
 
 #### Debug scenarios
 
@@ -247,8 +356,9 @@ To create a fake screen you need to have `Xvfb` installed.
 | `vel_control.py`       | Example scenario where three agents have velocity controllers with different acceleration constraints                                                                                                                                                                                                                                                                                   | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/vel_control.gif?raw=true" alt="drawing" width="300"/>       |
 | `goal.py`              | An agent with a velocity controller is spawned at random in the workspace. It is rewarded for moving to a randomly initialised goal while consuming the least energy. The agent observes its velocity and the relative position to the goal.                                                                                                                                            | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/goal.gif?raw=true" alt="drawing" width="300"/>              | 
 | `het_mass.py`          | Two agents with different masses are spawned randomly in the workspace. They are rewarded for maximising the team maximum speed while minimizing the team energy expenditure. The optimal policy requires the heavy agent to stay still while the light agent moves at maximum speed.                                                                                                   | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/het_mass.gif?raw=true" alt="drawing" width="300"/>          |
-| `line_trajectory.py`   | One agent is rewarded to move in a line trajectory .                                                                                                                                                                                                                                                                                                                                    | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/line_trajectory.gif?raw=true" alt="drawing" width="300"/>   |
+| `line_trajectory.py`   | One agent is rewarded to move in a line trajectory.                                                                                                                                                                                                                                                                                                                                     | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/line_trajectory.gif?raw=true" alt="drawing" width="300"/>   |
 | `circle_trajectory.py` | One agent is rewarded to move in a circle trajectory at the `desired_radius`.                                                                                                                                                                                                                                                                                                           | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/circle_trajectory.gif?raw=true" alt="drawing" width="300"/> |
+| `diff_drive.py`        | An example of the `diff_drive` dynamic model constraint. Both agents have rotational actions which can be controlled interactively.  The first agent has differential drive dynamics. The second agent has standard vmas holonomic dynamics.                                                                                                                                            | <img src="https://github.com/matteobettini/vmas-media/blob/main/media/scenarios/diff_drive.gif?raw=true" alt="drawing" width="300"/>        |
 
 ### [MPE](https://github.com/openai/multiagent-particle-envs)
 
@@ -264,14 +374,27 @@ To create a fake screen you need to have `Xvfb` installed.
 | `simple_tag.py` (Predator-prey)                          | N              | Y            | Predator-prey environment. Good agents (green) are faster and want to avoid being hit by adversaries (red). Adversaries are slower and want to hit good agents. Obstacles (large black circles) block the way.                                                                                                                                                                                                                                                                                                                                                    |
 | `simple_world_comm.py`                                   | Y              | Y            | Environment seen in the video accompanying the paper. Same as simple_tag, except (1) there is food (small blue balls) that the good agents are rewarded for being near, (2) we now have ‘forests’ that hide agents inside from being seen from outside; (3) there is a ‘leader adversary” that can see the agents at all times, and can communicate with the other adversaries to help coordinate the chase.                                                                                                                                                      |
 
+## Our papers using VMAS
+
+- [VMAS](https://matteobettini.github.io/publication/vmas-a-vectorized-multi-agent-simulator-for-collective-robot-learning/) features training of `balance`, `transport`, `give_way`, `wheel`
+- [HetGPPO](https://matteobettini.github.io/publication/heterogeneous-multi-robot-reinforcement-learning/) features training of `het_mass`, `give_way`, `joint_passage`, `joint_passage_size`
+- [SND](https://matteobettini.github.io/publication/system-neural-diversity-measuring-behavioral-heterogeneity-in-multi-agent-learning/) features training of `navigation`, `joint_passage`, `joint_passage_size`, `wind`
+
 ## TODOS
 
+- [ ] Improve VMAS performance
+- [ ] Dict obs support in torchrl
+- [X] Make TextLine a Geom usable in a scenario
+- [ ] Implement 2D birds eye view camera sensor
+- [ ] Notebook on how to use torch rl with vmas
+- [ ] Reset any number of dimensions
+- [ ] Improve test efficiency and add new tests
+- [ ] Implement 1D camera sensor
+- [ ] Allow any number of actions
+- [X] Allow dict obs spaces and multidim obs
 - [X] Talk about action preprocessing and velocity controller
 - [X] New envs from joint project with their descriptions
-- [ ] New envs from adversarial project
-- [ ] Custom actions for scenario
-- [ ] Implement 1D camera sensor
-- [ ] Make football heuristic efficient
+- [X] Talk about navigation / multi_goal
 - [X] Link video of experiments
 - [X] Add LIDAR section
 - [X] Implement LIDAR

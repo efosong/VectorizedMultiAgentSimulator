@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import math
@@ -12,7 +12,7 @@ from vmas.simulator.core import Agent, Box, Landmark, Sphere, World, Line
 from vmas.simulator.joints import Joint
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, Y, X
-from vmas.simulator.velocity_controller import VelocityController
+from vmas.simulator.controllers.velocity_controller import VelocityController
 
 
 def get_line_angle_0_90(rot: Tensor):
@@ -186,6 +186,12 @@ class Scenario(BaseScenario):
             self.walls.append(wall)
 
         self.create_passage_map(world)
+
+        self.pos_rew = torch.zeros(batch_dim, device=device)
+        self.rot_rew = self.pos_rew.clone()
+        self.collision_rew = self.pos_rew.clone()
+        self.energy_rew = self.pos_rew.clone()
+        self.all_passed = torch.full((batch_dim,), False, device=device)
 
         return world
 
@@ -381,9 +387,9 @@ class Scenario(BaseScenario):
             self.rew = torch.zeros(
                 self.world.batch_dim, device=self.world.device, dtype=torch.float32
             )
-            self.pos_rew = self.rew.clone()
-            self.rot_rew = self.rew.clone()
-            self.collision_rew = self.rew.clone()
+            self.pos_rew[:] = 0
+            self.rot_rew[:] = 0
+            self.collision_rew[:] = 0
 
             joint_passed = self.joint.landmark.state.pos[:, Y] > 0
             self.all_passed = (
@@ -515,7 +521,10 @@ class Scenario(BaseScenario):
         ] + ([angle_to_vector(joint_angle)] if self.observe_joint_angle else [])
 
         for i, obs in enumerate(observations):
-            noise = torch.zeros(*obs.shape, device=self.world.device,).uniform_(
+            noise = torch.zeros(
+                *obs.shape,
+                device=self.world.device,
+            ).uniform_(
                 -self.obs_noise,
                 self.obs_noise,
             )
@@ -559,15 +568,14 @@ class Scenario(BaseScenario):
         if is_first:
             just_passed = self.all_passed * (self.passed == 0)
             self.passed[just_passed] = 100
-            return {
+            self.info_stored = {
                 "pos_rew": self.pos_rew,
                 "rot_rew": self.rot_rew,
                 "collision_rew": self.collision_rew,
                 "energy_rew": self.energy_rew,
                 "passed": just_passed.to(torch.int),
             }
-        else:
-            return {}
+        return self.info_stored
 
     def create_passage_map(self, world: World):
         # Add landmarks
@@ -609,7 +617,6 @@ class Scenario(BaseScenario):
         self.joint.landmark.collision_filter = joint_collides
 
     def spawn_passage_map(self, env_index):
-
         passage_indexes = []
         j = self.n_boxes // 2
         for i in range(self.n_passages):

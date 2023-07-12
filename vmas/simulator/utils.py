@@ -1,10 +1,10 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import os
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Tuple
+from typing import List, Tuple, Union, Dict, Sequence
 
 import numpy as np
 import torch
@@ -23,6 +23,30 @@ JOINT_FORCE = 130
 DRAG = 0.25
 LINEAR_FRICTION = 0.0
 ANGULAR_FRICTION = 0.0
+
+DEVICE_TYPING = Union[torch.device, str, int]
+
+VIRIDIS_CMAP = np.array(
+    [
+        [0.267004, 0.004874, 0.329415],
+        [0.278826, 0.17549, 0.483397],
+        [0.229739, 0.322361, 0.545706],
+        [0.172719, 0.448791, 0.557885],
+        [0.127568, 0.566949, 0.550556],
+        [0.157851, 0.683765, 0.501686],
+        [0.369214, 0.788888, 0.382914],
+        [0.678489, 0.863742, 0.189503],
+    ]
+)
+
+AGENT_OBS_TYPE = Union[Tensor, Dict[str, Tensor]]
+AGENT_INFO_TYPE = Dict[str, Tensor]
+AGENT_REWARD_TYPE = Tensor
+
+OBS_TYPE = Union[List[AGENT_OBS_TYPE], Dict[str, AGENT_OBS_TYPE]]
+INFO_TYPE = Union[List[AGENT_INFO_TYPE], Dict[str, AGENT_INFO_TYPE]]
+REWARD_TYPE = Union[List[AGENT_REWARD_TYPE], Dict[str, AGENT_REWARD_TYPE]]
+DONE_TYPE = Tensor
 
 
 class Color(Enum):
@@ -92,8 +116,41 @@ def save_video(name: str, frame_list: List[np.array], fps: int):
     )
     for img in frame_list:
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        # cv2.imwrite(f"{name}.png", img)
+        # break
         video.write(img)
     video.release()
+
+
+def x_to_rgb_colormap(
+    x: np.ndarray, low: float = None, high: float = None, alpha: float = 1.0
+):
+    res = VIRIDIS_CMAP.shape[0]
+    if low is None:
+        low = np.min(x)
+    if high is None:
+        high = np.max(x)
+    x = np.clip(x, low, high)
+    x = (x - low) / (high - low) * (res - 1)
+    x_c0_idx = np.floor(x).astype(int)
+    x_c1_idx = np.ceil(x).astype(int)
+    x_c0 = VIRIDIS_CMAP[x_c0_idx, :]
+    x_c1 = VIRIDIS_CMAP[x_c1_idx, :]
+    t = x - x_c0_idx
+    rgb = t[:, None] * x_c1 + (1 - t)[:, None] * x_c0
+    colors = np.concatenate([rgb, alpha * np.ones((rgb.shape[0], 1))], axis=-1)
+    return colors
+
+
+def extract_nested_with_index(data: Union[Tensor, Dict[str, Tensor]], index: int):
+    if isinstance(data, Tensor):
+        return data[index]
+    elif isinstance(data, Dict):
+        return {
+            key: extract_nested_with_index(value, index) for key, value in data.items()
+        }
+    else:
+        raise NotImplementedError(f"Invalid type of data {data}")
 
 
 class TorchUtils:
@@ -129,6 +186,17 @@ class TorchUtils:
     @staticmethod
     def compute_torque(f: Tensor, r: Tensor) -> Tensor:
         return TorchUtils.cross(r, f)
+
+    @staticmethod
+    def to_numpy(data: Union[Tensor, Dict[str, Tensor], List[Tensor]]):
+        if isinstance(data, Tensor):
+            return data.cpu().detach().numpy()
+        elif isinstance(data, Dict):
+            return {key: TorchUtils.to_numpy(value) for key, value in data.items()}
+        elif isinstance(data, Sequence):
+            return [TorchUtils.to_numpy(value) for value in data]
+        else:
+            raise NotImplementedError(f"Invalid type of data {data}")
 
 
 class ScenarioUtils:

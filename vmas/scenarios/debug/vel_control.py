@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 from typing import Dict
@@ -10,7 +10,7 @@ from vmas import render_interactively
 from vmas.simulator.core import Agent, World, Landmark
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, X, TorchUtils
-from vmas.simulator.velocity_controller import VelocityController
+from vmas.simulator.controllers.velocity_controller import VelocityController
 
 
 class Scenario(BaseScenario):
@@ -46,7 +46,7 @@ class Scenario(BaseScenario):
 
         # Add agents
         agent = Agent(
-            name=f"agent 0",
+            name="agent 0",
             collide=False,
             color=Color.GREEN,
             render_action=True,
@@ -59,7 +59,7 @@ class Scenario(BaseScenario):
         )
         world.add_agent(agent)
         agent = Agent(
-            name=f"agent 1",
+            name="agent 1",
             collide=False,
             render_action=True,
             # f_range=30,
@@ -70,7 +70,7 @@ class Scenario(BaseScenario):
         )
         world.add_agent(agent)
         agent = Agent(
-            name=f"agent 2",
+            name="agent 2",
             collide=False,
             render_action=True,
             f_range=30,
@@ -83,6 +83,8 @@ class Scenario(BaseScenario):
 
         self.landmark = Landmark("landmark 0", collide=False, movable=True)
         world.add_landmark(self.landmark)
+
+        self.energy_expenditure = torch.zeros(batch_dim, device=device)
 
         return world
 
@@ -147,7 +149,6 @@ class Scenario(BaseScenario):
         is_first = agent == self.world.agents[0]
 
         if is_first:
-
             self.energy_expenditure = (
                 -torch.stack(
                     [

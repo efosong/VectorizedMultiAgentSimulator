@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import typing
@@ -10,7 +10,7 @@ from vmas import render_interactively
 from vmas.simulator.core import Agent, World, Landmark, Sphere, Line, Box
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, TorchUtils
-from vmas.simulator.velocity_controller import VelocityController
+from vmas.simulator.controllers.velocity_controller import VelocityController
 
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
@@ -26,6 +26,7 @@ class Scenario(BaseScenario):
         self.min_input_norm = kwargs.get("min_input_norm", 0.08)
         self.comms_range = kwargs.get("comms_range", 5)
         self.shared_rew = kwargs.get("shared_rew", True)
+        self.n_agents = kwargs.get("n_agents", 4)
 
         self.pos_shaping_factor = kwargs.get("pos_shaping_factor", 1)  # max is 8
         self.final_reward = kwargs.get("final_reward", 0.01)
@@ -85,10 +86,15 @@ class Scenario(BaseScenario):
                 color=self.colors[i],
             )
             agent.goal = goal
+            agent.pos_rew = torch.zeros(batch_dim, device=device)
+            agent.agent_collision_rew = agent.pos_rew.clone()
             world.add_agent(agent)
             world.add_landmark(goal)
 
         self.spawn_map(world)
+
+        self.pos_rew = torch.zeros(batch_dim, device=device)
+        self.final_rew = self.pos_rew.clone()
 
         return world
 
@@ -193,10 +199,8 @@ class Scenario(BaseScenario):
         is_first = agent == self.world.agents[0]
 
         if is_first:
-            self.pos_rew = torch.zeros(
-                self.world.batch_dim, device=self.world.device, dtype=torch.float32
-            )
-            self.final_rew = torch.zeros(self.world.batch_dim, device=self.world.device)
+            self.pos_rew[:] = 0
+            self.final_rew[:] = 0
 
             for a in self.world.agents:
                 a.distance_to_goal = torch.linalg.vector_norm(
@@ -222,9 +226,7 @@ class Scenario(BaseScenario):
             self.final_rew[self.all_goal_reached] = self.final_reward
             self.reached_goal += self.all_goal_reached
 
-        agent.agent_collision_rew = torch.zeros(
-            (self.world.batch_dim,), device=self.world.device
-        )
+        agent.agent_collision_rew[:] = 0
         # agent.obstacle_collision_rew = torch.zeros(
         #     (self.world.batch_dim,), device=self.world.device
         # )
@@ -271,7 +273,10 @@ class Scenario(BaseScenario):
 
         if self.obs_noise > 0:
             for i, obs in enumerate(observations):
-                noise = torch.zeros(*obs.shape, device=self.world.device,).uniform_(
+                noise = torch.zeros(
+                    *obs.shape,
+                    device=self.world.device,
+                ).uniform_(
                     -self.obs_noise,
                     self.obs_noise,
                 )
@@ -318,7 +323,6 @@ class Scenario(BaseScenario):
         return geoms
 
     def spawn_map(self, world: World):
-
         self.scenario_length = 5
         self.scenario_width = 0.4
 

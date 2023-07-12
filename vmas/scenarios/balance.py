@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 
@@ -64,18 +64,20 @@ class Scenario(BaseScenario):
         )
         world.add_landmark(self.line)
 
-        floor = Landmark(
+        self.floor = Landmark(
             name="floor",
             collide=True,
             shape=Box(length=10, width=1),
             color=Color.WHITE,
         )
-        world.add_landmark(floor)
+        world.add_landmark(self.floor)
+
+        self.pos_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
+        self.ground_rew = self.pos_rew.clone()
 
         return world
 
     def reset_world_at(self, env_index: int = None):
-
         goal_pos = torch.cat(
             [
                 torch.zeros(
@@ -173,14 +175,20 @@ class Scenario(BaseScenario):
             line_pos + package_rel_pos,
             batch_index=env_index,
         )
-        floor = self.world.landmarks[3]
-        floor.set_pos(
+
+        self.floor.set_pos(
             torch.tensor(
-                [0, -self.world.y_semidim - floor.shape.width / 2 - self.agent_radius],
+                [
+                    0,
+                    -self.world.y_semidim
+                    - self.floor.shape.width / 2
+                    - self.agent_radius,
+                ],
                 device=self.world.device,
             ),
             batch_index=env_index,
         )
+        self.compute_on_the_ground()
         if env_index is None:
             self.global_shaping = (
                 torch.linalg.vector_norm(
@@ -197,20 +205,19 @@ class Scenario(BaseScenario):
                 * self.shaping_factor
             )
 
+    def compute_on_the_ground(self):
+        self.on_the_ground = self.world.is_overlapping(
+            self.line, self.floor
+        ) + self.world.is_overlapping(self.package, self.floor)
+
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
 
         if is_first:
-            self.pos_rew = torch.zeros(
-                self.world.batch_dim, device=self.world.device, dtype=torch.float32
-            )
-            self.ground_rew = torch.zeros(
-                self.world.batch_dim, device=self.world.device, dtype=torch.float32
-            )
+            self.pos_rew[:] = 0
+            self.ground_rew[:] = 0
 
-            self.on_the_ground = (
-                self.package.state.pos[:, Y] <= -self.world.y_semidim
-            ) + (self.line.state.pos[:, Y] <= -self.world.y_semidim)
+            self.compute_on_the_ground()
             self.package_dist = torch.linalg.vector_norm(
                 self.package.state.pos - self.package.goal.state.pos, dim=1
             )
@@ -247,7 +254,6 @@ class Scenario(BaseScenario):
 
     def info(self, agent: Agent):
         info = {"pos_rew": self.pos_rew, "ground_rew": self.ground_rew}
-        # When reset is called before reward()
         return info
 
 

@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 
@@ -11,7 +11,6 @@ from typing import Callable, List, Tuple
 
 import torch
 from torch import Tensor
-
 from vmas.simulator.joints import JointConstraint, Joint
 from vmas.simulator.sensors import Sensor
 from vmas.simulator.utils import (
@@ -55,7 +54,6 @@ class TorchVectorizedObject(object):
 
     @device.setter
     def device(self, device: torch.device):
-        assert self._device is None, "You can set device only once"
         self._device = device
 
     def _check_batch_index(self, batch_index: int):
@@ -63,6 +61,12 @@ class TorchVectorizedObject(object):
             assert (
                 0 <= batch_index < self.batch_dim
             ), f"Index must be between 0 and {self.batch_dim}, got {batch_index}"
+
+    def to(self, device: torch.device):
+        self.device = device
+        for attr, value in self.__dict__.items():
+            if isinstance(value, Tensor):
+                self.__dict__[attr] = value.to(device)
 
 
 class Shape(ABC):
@@ -266,6 +270,28 @@ class EntityState(TorchVectorizedObject):
 
         self._rot = rot.to(self._device)
 
+    def _reset(self, env_index: typing.Optional[int]):
+        for attr in [self.pos, self.rot, self.vel, self.ang_vel]:
+            if attr is not None:
+                if env_index is None:
+                    attr[:] = 0.0
+                else:
+                    attr[env_index] = 0.0
+
+    def _spawn(self, dim_c: int, dim_p: int):
+        self.pos = torch.zeros(
+            self.batch_dim, dim_p, device=self.device, dtype=torch.float32
+        )
+        self.vel = torch.zeros(
+            self.batch_dim, dim_p, device=self.device, dtype=torch.float32
+        )
+        self.rot = torch.zeros(
+            self.batch_dim, 1, device=self.device, dtype=torch.float32
+        )
+        self.ang_vel = torch.zeros(
+            self.batch_dim, 1, device=self.device, dtype=torch.float32
+        )
+
 
 class AgentState(EntityState):
     def __init__(
@@ -289,6 +315,24 @@ class AgentState(EntityState):
         ), f"Internal state must match batch dim, got {c.shape[0]}, expected {self._batch_dim}"
 
         self._c = c.to(self._device)
+
+    @override(EntityState)
+    def _reset(self, env_index: typing.Optional[int]):
+        for attr in [self.c]:
+            if attr is not None:
+                if env_index is None:
+                    attr[:] = 0.0
+                else:
+                    attr[env_index] = 0.0
+        super()._reset(env_index)
+
+    @override(EntityState)
+    def _spawn(self, dim_c: int, dim_p: int):
+        if dim_c > 0:
+            self.c = torch.zeros(
+                self.batch_dim, dim_c, device=self.device, dtype=torch.float32
+            )
+        super()._spawn(dim_c, dim_p)
 
 
 # action of an agent
@@ -393,6 +437,14 @@ class Action(TorchVectorizedObject):
     def u_rot_noise(self):
         return self._u_rot_noise
 
+    def _reset(self, env_index: typing.Optional[int]):
+        for attr in [self.u, self.u_rot, self.c]:
+            if attr is not None:
+                if env_index is None:
+                    attr[:] = 0.0
+                else:
+                    attr[env_index] = 0.0
+
 
 # properties and state of physical world entity
 class Entity(TorchVectorizedObject, Observable, ABC):
@@ -412,6 +464,7 @@ class Entity(TorchVectorizedObject, Observable, ABC):
         drag: float = None,
         linear_friction: float = None,
         angular_friction: float = None,
+        gravity: typing.Union[float, Tensor] = None,
         collision_filter: Callable[[Entity], bool] = lambda _: True,
     ):
         TorchVectorizedObject.__init__(self)
@@ -446,6 +499,15 @@ class Entity(TorchVectorizedObject, Observable, ABC):
         # friction
         self._linear_friction = linear_friction
         self._angular_friction = angular_friction
+        # gravity
+        if isinstance(gravity, Tensor):
+            self._gravity = gravity
+        else:
+            self._gravity = (
+                torch.tensor(gravity, device=self.device, dtype=torch.float32)
+                if gravity is not None
+                else gravity
+            )
         # entity goal
         self._goal = None
         # Render the entity
@@ -455,11 +517,6 @@ class Entity(TorchVectorizedObject, Observable, ABC):
     def batch_dim(self, batch_dim: int):
         TorchVectorizedObject.batch_dim.fset(self, batch_dim)
         self._state.batch_dim = batch_dim
-
-    @TorchVectorizedObject.device.setter
-    def device(self, device: torch.device):
-        TorchVectorizedObject.device.fset(self, device)
-        self._state.device = device
 
     @property
     def is_rendering(self):
@@ -545,6 +602,18 @@ class Entity(TorchVectorizedObject, Observable, ABC):
     def linear_friction(self):
         return self._linear_friction
 
+    @linear_friction.setter
+    def linear_friction(self, value):
+        self._linear_friction = value
+
+    @property
+    def gravity(self):
+        return self._gravity
+
+    @gravity.setter
+    def gravity(self, value):
+        self._gravity = value
+
     @property
     def angular_friction(self):
         return self._angular_friction
@@ -561,31 +630,11 @@ class Entity(TorchVectorizedObject, Observable, ABC):
     def collision_filter(self, collision_filter: Callable[[Entity], bool]):
         self._collision_filter = collision_filter
 
-    def _spawn(self, dim_p: int):
-        self.state.pos = torch.zeros(
-            self.batch_dim, dim_p, device=self.device, dtype=torch.float32
-        )
-        self.state.vel = torch.zeros(
-            self.batch_dim, dim_p, device=self.device, dtype=torch.float32
-        )
-        self.state.rot = torch.zeros(
-            self.batch_dim, 1, device=self.device, dtype=torch.float32
-        )
-        self.state.ang_vel = torch.zeros(
-            self.batch_dim, 1, device=self.device, dtype=torch.float32
-        )
+    def _spawn(self, dim_c: int, dim_p: int):
+        self.state._spawn(dim_c, dim_p)
 
     def _reset(self, env_index: int):
-        if env_index is None:
-            self.state.pos[:] = 0.0
-            self.state.vel[:] = 0.0
-            self.state.rot[:] = 0.0
-            self.state.ang_vel[:] = 0.0
-        else:
-            self.state.pos[env_index] = 0.0
-            self.state.vel[env_index] = 0.0
-            self.state.rot[env_index] = 0.0
-            self.state.ang_vel[env_index] = 0.0
+        self.state._reset(env_index)
 
     def set_pos(self, pos: Tensor, batch_index: int):
         self._set_state_property(EntityState.pos, self.state, pos, batch_index)
@@ -616,6 +665,11 @@ class Entity(TorchVectorizedObject, Observable, ABC):
             value = prop.fget(entity)
             value[batch_index] = new
         self.notify_observers()
+
+    @override(TorchVectorizedObject)
+    def to(self, device: torch.device):
+        super().to(device)
+        self.state.to(device)
 
     def render(self, env_index: int = 0) -> "List[Geom]":
         from vmas.simulator import rendering
@@ -655,6 +709,7 @@ class Landmark(Entity):
         drag: float = None,
         linear_friction: float = None,
         angular_friction: float = None,
+        gravity: float = None,
         collision_filter: Callable[[Entity], bool] = lambda _: True,
     ):
         super().__init__(
@@ -672,6 +727,7 @@ class Landmark(Entity):
             drag,
             linear_friction,
             angular_friction,
+            gravity,
             collision_filter,
         )
 
@@ -711,6 +767,7 @@ class Agent(Entity):
         drag: float = None,
         linear_friction: float = None,
         angular_friction: float = None,
+        gravity: float = None,
         collision_filter: Callable[[Entity], bool] = lambda _: True,
         render_action: bool = False,
     ):
@@ -729,6 +786,7 @@ class Agent(Entity):
             drag=drag,
             linear_friction=linear_friction,
             angular_friction=angular_friction,
+            gravity=gravity,
             collision_filter=collision_filter,
         )
         if obs_range == 0.0:
@@ -781,11 +839,6 @@ class Agent(Entity):
     def batch_dim(self, batch_dim: int):
         Entity.batch_dim.fset(self, batch_dim)
         self._action.batch_dim = batch_dim
-
-    @Entity.device.setter
-    def device(self, device: torch.device):
-        Entity.device.fset(self, device)
-        self._action.device = device
 
     @property
     def action_script(self) -> Callable[[Agent, World], None]:
@@ -879,26 +932,28 @@ class Agent(Entity):
         return self._adversary
 
     @override(Entity)
-    def _spawn(self, dim_c, dim_p: int):
-        super()._spawn(dim_p)
+    def _spawn(self, dim_c: int, dim_p: int):
         if dim_c == 0:
             assert (
                 self.silent
             ), f"Agent {self.name} must be silent when world has no communication"
-        elif dim_c > 0 and not self.silent:
-            self.state.c = torch.zeros(
-                self.batch_dim, dim_c, device=self.device, dtype=torch.float32
-            )
+        if self.silent:
+            dim_c = 0
+        super()._spawn(dim_c, dim_p)
 
     @override(Entity)
     def _reset(self, env_index: int):
+        self.action._reset(env_index)
         super()._reset(env_index)
-        if self.state.c is not None:
-            if env_index is None:
-                self.state.c[:] = 0.0
-            else:
-                self.state.c[env_index] = 0.0
 
+    @override(Entity)
+    def to(self, device: torch.device):
+        super().to(device)
+        self.action.to(device)
+        for sensor in self.sensors:
+            sensor.to(device)
+
+    @override(Entity)
     def render(self, env_index: int = 0) -> "List[Geom]":
         from vmas.simulator import rendering
 
@@ -989,15 +1044,15 @@ class World(TorchVectorizedObject):
     def add_agent(self, agent: Agent):
         """Only way to add agents to the world"""
         agent.batch_dim = self._batch_dim
-        agent.device = self._device
-        agent._spawn(dim_p=self.dim_p, dim_c=self._dim_c)
+        agent.to(self._device)
+        agent._spawn(dim_c=self._dim_c, dim_p=self.dim_p)
         self._agents.append(agent)
 
     def add_landmark(self, landmark: Landmark):
         """Only way to add landmarks to the world"""
         landmark.batch_dim = self._batch_dim
-        landmark.device = self._device
-        landmark._spawn(self.dim_p)
+        landmark.to(self._device)
+        landmark._spawn(dim_c=self.dim_c, dim_p=self.dim_p)
         self._landmarks.append(landmark)
 
     def add_joint(self, joint: Joint):
@@ -1063,12 +1118,6 @@ class World(TorchVectorizedObject):
     @property
     def scripted_agents(self) -> List[Agent]:
         return [agent for agent in self._agents if agent.action_script is not None]
-
-    def seed(self, seed=None):
-        if seed is None:
-            seed = 0
-        torch.manual_seed(seed)
-        return [seed]
 
     def _cast_ray_to_box(
         self,
@@ -1488,18 +1537,23 @@ class World(TorchVectorizedObject):
             assert not self.torque.isnan().any()
 
     def _apply_gravity(self, entity: Entity, index: int):
-        if not (self._gravity == 0.0).all():
-            if entity.movable:
+        if entity.movable:
+            if not (self._gravity == 0.0).all():
                 self.force[:, index] += entity.mass * self._gravity
+            if entity.gravity is not None:
+                self.force[:, index] += entity.mass * entity.gravity
 
     def _apply_friction_force(self, entity: Entity, index: int):
         def get_friction_force(vel, coeff, force, mass):
             speed = torch.linalg.vector_norm(vel, dim=1)
             static = speed == 0
 
-            friction_force_constant = torch.full_like(
-                force, coeff * mass, device=self.device
-            )
+            if not isinstance(coeff, Tensor):
+                coeff = torch.full_like(force, coeff, device=self.device)
+            coeff = coeff.expand(force.shape)
+
+            friction_force_constant = coeff * mass
+
             friction_force = -(vel / speed.unsqueeze(-1)) * torch.minimum(
                 friction_force_constant, (vel.abs() / self._sub_dt) * mass
             )
@@ -1836,7 +1890,6 @@ class World(TorchVectorizedObject):
     def _get_closest_points_line_line(
         self, line_pos, line_rot, line_length, line2_pos, line2_rot, line2_length
     ):
-
         point_a1, point_a2 = self.get_line_extrema(line_pos, line_rot, line_length)
         point_b1, point_b2 = self.get_line_extrema(line2_pos, line2_rot, line2_length)
 
@@ -2146,3 +2199,9 @@ class World(TorchVectorizedObject):
                 else 0.0
             )
             agent.state.c = agent.action.c + noise
+
+    @override(TorchVectorizedObject)
+    def to(self, device: torch.device):
+        super().to(device)
+        for e in self.entities:
+            e.to(device)

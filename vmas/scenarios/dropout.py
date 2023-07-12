@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import math
@@ -36,6 +36,10 @@ class Scenario(BaseScenario):
             color=Color.GREEN,
         )
         world.add_landmark(goal)
+
+        self.pos_rew = torch.zeros(batch_dim, device=device)
+        self.energy_rew = self.pos_rew.clone()
+        self._done = torch.zeros(batch_dim, device=device, dtype=torch.bool)
 
         return world
 
@@ -75,9 +79,11 @@ class Scenario(BaseScenario):
                     (self.world.batch_dim,), False, device=self.world.device
                 )
                 landmark.reset_render()
+                self._done[:] = False
             else:
                 landmark.eaten[env_index] = False
                 landmark.is_rendering[env_index] = True
+                self._done[env_index] = False
 
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
@@ -98,7 +104,7 @@ class Scenario(BaseScenario):
                 dim=-1,
             )
 
-        self.pos_rew = torch.zeros(self.world.batch_dim, device=self.world.device)
+        self.pos_rew[:] = 0
         self.pos_rew[self.any_eaten * ~self.world.landmarks[0].eaten] = 1
 
         if is_last:
@@ -132,11 +138,7 @@ class Scenario(BaseScenario):
         )
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
-        try:
-            info = {"pos_rew": self.pos_rew, "energy_rew": self.energy_rew}
-        # When reset is called before reward()
-        except AttributeError:
-            info = {}
+        info = {"pos_rew": self.pos_rew, "energy_rew": self.energy_rew}
         return info
 
     def done(self):

@@ -1,11 +1,10 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 from typing import Dict
 
 import torch
 from torch import Tensor
-
 from vmas import render_interactively
 from vmas.simulator.core import Agent, Landmark, Sphere, World, Line
 from vmas.simulator.joints import Joint
@@ -90,10 +89,13 @@ class Scenario(BaseScenario):
 
         self.build_path_line(world)
 
+        self.pos_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
+        self.collision_rew = self.pos_rew.clone()
+        self.collided = torch.full((world.batch_dim,), False, device=device)
+
         return world
 
     def reset_world_at(self, env_index: int = None):
-
         start_angle = torch.zeros(
             (1, 1) if env_index is not None else (self.world.batch_dim, 1),
             device=self.world.device,
@@ -189,6 +191,7 @@ class Scenario(BaseScenario):
                 )
                 * self.pos_shaping_factor
             )
+            self.collided[:] = False
         else:
             self.pos_shaping[env_index] = (
                 torch.linalg.vector_norm(
@@ -196,6 +199,7 @@ class Scenario(BaseScenario):
                 )
                 * self.pos_shaping_factor
             )
+            self.collided[env_index] = False
 
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
@@ -204,11 +208,9 @@ class Scenario(BaseScenario):
             self.rew = torch.zeros(
                 self.world.batch_dim, device=self.world.device, dtype=torch.float32
             )
-            self.pos_rew = self.rew.clone()
-            self.collision_rew = self.rew.clone()
-            self.collided = torch.full(
-                (self.world.batch_dim,), False, device=self.world.device
-            )
+            self.pos_rew[:] = 0
+            self.collision_rew[:] = 0
+            self.collided[:] = False
 
             dist_to_goal = torch.linalg.vector_norm(
                 self.ball.state.pos - self.goal.state.pos,

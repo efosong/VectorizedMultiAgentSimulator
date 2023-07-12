@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 
@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="vmas",
-    version="1.2.0",
+    version="1.2.11",
     description="Vectorized Multi-Agent Simulator",
     url="https://github.com/proroklab/VectorizedMultiAgentSimulator",
     license="GPLv3",
@@ -18,5 +18,7 @@ setup(
         "torch",
         "pyglet<=1.5.27",
         "gymnasium",
+        "six",
     ],
+    include_package_data=True,
 )

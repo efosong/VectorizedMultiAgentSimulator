@@ -1,4 +1,4 @@
-#  Copyright (c) 2022.
+#  Copyright (c) 2022-2023.
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import math
@@ -7,6 +7,7 @@ from typing import Dict
 import numpy as np
 import torch
 from torch import Tensor
+
 from vmas import render_interactively
 from vmas.simulator.core import Agent, World
 from vmas.simulator.scenario import BaseScenario
@@ -24,7 +25,7 @@ class Scenario(BaseScenario):
         world = World(batch_dim, device)
         # Add agents
         self.green_agent = Agent(
-            name=f"agent 0",
+            name="agent 0",
             collide=False,
             color=Color.GREEN,
             render_action=True,
@@ -33,9 +34,12 @@ class Scenario(BaseScenario):
         )
         world.add_agent(self.green_agent)
         self.blue_agent = Agent(
-            name=f"agent 1", collide=False, render_action=True, f_range=1
+            name="agent 1", collide=False, render_action=True, f_range=1
         )
         world.add_agent(self.blue_agent)
+
+        self.max_speed = torch.zeros(batch_dim, device=device)
+        self.energy_expenditure = self.max_speed.clone()
 
         return world
 

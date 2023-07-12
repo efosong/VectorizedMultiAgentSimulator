@@ -129,7 +129,7 @@ class Environment(TorchVectorizedObject):
         if dict_agent_names is None:
             dict_agent_names = self.dict_spaces
 
-        obs = rewards = infos = dones = None
+        obs = rewards = infos = terminated = truncated = None
 
         if get_observations:
             obs = {} if dict_agent_names else []
@@ -161,7 +161,7 @@ class Environment(TorchVectorizedObject):
         if get_dones:
             terminated, truncated = self.done()
 
-        result = [obs, rewards, terminated, trunacted, infos]
+        result = [obs, rewards, terminated, truncated, infos]
         return [data for data in result if data is not None]
 
     def seed(self, seed=None):
@@ -247,14 +247,9 @@ class Environment(TorchVectorizedObject):
         # )
         # print(f"Dones len (n_envs): {len(dones)}, dones[0] (done env 0): {dones[0]}")
         # print(f"Info len (n_agents): {len(infos)}, info[0] (infos agent 0): {infos[0]}")
-        return obs, rewards, terminated, trunacted, infos
+        return obs, rewards, terminated, truncated, infos
 
     def done(self):
-        dones = self.scenario.done().clone()
-        if self.max_steps is not None:
-            dones += self.steps >= self.max_steps
-        return dones
-
         terminated = self.scenario.done().clone()
         if self.max_steps is not None:
             truncated = self.steps > self.max_steps
@@ -262,13 +257,6 @@ class Environment(TorchVectorizedObject):
             truncated = 0 * self.steps > 1
         dones = (terminated | truncated)
         return terminated, truncated
-        # TODO should this be in the ADE wrapper code?
-        # for env_idx, done in enumerate(dones):
-        #     if done:
-        #         reset_obs = self.reset_at(env_idx)
-        #         for ag_idx in range(len(obs)):
-        #             obs[ag_idx][env_idx] = reset_obs[ag_idx]
-
 
     def get_action_space(self):
         if not self.dict_spaces:

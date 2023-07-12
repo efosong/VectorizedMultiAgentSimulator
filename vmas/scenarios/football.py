@@ -42,6 +42,8 @@ class Scenario(BaseScenario):
         self.viewer_size = kwargs.get("viewer_size", (1200, 800))
         self.ai_red_agents = kwargs.get("ai_red_agents", True)
         self.ai_blue_agents = kwargs.get("ai_blue_agents", False)
+        self.blue_agent_names = kwargs.get("blue_agent_names", [])
+        self.red_agent_names = kwargs.get("red_agent_names", [])
         self.n_blue_agents = kwargs.get("n_blue_agents", 3)
         self.n_red_agents = kwargs.get("n_red_agents", 3)
         self.agent_size = kwargs.get("agent_size", 0.025)
@@ -57,7 +59,6 @@ class Scenario(BaseScenario):
         self.n_traj_points = kwargs.get("n_traj_points", 8)
         self.dense_reward_ratio = kwargs.get("dense_reward_ratio", 0.001)
         # position boxes
-        #                                     x     y    l     w
         self.blue_pos = defaultdict(lambda: [-0.3,-1.0, 0.1, 2.0])
         self.blue_pos.update(kwargs.get("blue_pos", {}))
         self.red_pos = defaultdict(lambda: [-1.0, -1.0, 1.0, 2.0])
@@ -93,8 +94,12 @@ class Scenario(BaseScenario):
 
         blue_agents = []
         for i in range(self.n_blue_agents):
+            if i < len(self.blue_agent_names):
+                name = self.blue_agent_names[i]
+            else:
+                name=f"Agent Blue {i}"
             agent = Agent(
-                name=f"Agent Blue {i}",
+                name=name,
                 shape=Sphere(radius=self.agent_size),
                 action_script=self.blue_controller.run if self.ai_blue_agents else None,
                 u_multiplier=self.u_multiplier,
@@ -106,8 +111,12 @@ class Scenario(BaseScenario):
 
         red_agents = []
         for i in range(self.n_red_agents):
-            agent = Agent(
+            if i < len(self.red_agent_names):
+                name = self.red_agent_names[i]
+            else:
                 name=f"Agent Red {i}",
+            agent = Agent(
+                name=name,
                 shape=Sphere(radius=self.agent_size),
                 action_script=self.red_controller.run if self.ai_red_agents else None,
                 u_multiplier=self.u_multiplier,
@@ -123,8 +132,8 @@ class Scenario(BaseScenario):
         world.blue_agents = blue_agents
 
     def reset_agents(self, env_index: int = None):
-        for i, agent in enumerate(self.blue_agents):
-            x,y,l,w = self.blue_pos[i]
+        for agent in self.blue_agents:
+            x,y,l,w = self.blue_pos[agent.name]
             agent.set_pos(
                 torch.rand(
                     (1, self.world.dim_p)
@@ -146,8 +155,8 @@ class Scenario(BaseScenario):
                 torch.zeros(2, device=self.world.device),
                 batch_index=env_index,
             )
-        for i, agent in enumerate(self.red_agents):
-            x,y,l,w = self.red_pos[i]
+        for agent in self.red_agents:
+            x,y,l,w = self.red_pos[agent]
             agent.set_pos(
                 -torch.rand(
                     (1, self.world.dim_p)
@@ -196,6 +205,7 @@ class Scenario(BaseScenario):
 
     def reset_ball(self, env_index: int = None):
         if self.ball_at_feet == "blue":
+            # Spawn at any blue agent's feet
             idx = torch.randint(len(self.blue_agents), (1,))
             ball_pos = (
                 (self.blue_agents[idx].state.pos
@@ -204,11 +214,14 @@ class Scenario(BaseScenario):
                  )
                 + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )
-        elif self.ball_at_feet == "blue_0":
+        #elif self.ball_at_feet == "blue_0":
+        elif self.ball_at_feet in self.blue_agent_names:
+            # Spawn at specific blue agent's feet
+            agent_idx = self.blue_agent_names.index(self.ball_at_feet)
             ball_pos = (
-                (self.blue_agents[0].state.pos
+                (self.blue_agents[agent_idx].state.pos
                  if env_index is None
-                 else self.blue_agents[0].state.pos[env_index]
+                 else self.blue_agents[agent_idx].state.pos[env_index]
                  )
                 + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )
@@ -221,11 +234,12 @@ class Scenario(BaseScenario):
                  )
                 - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )
-        elif self.ball_at_feet == "red_0":
+        elif self.ball_at_feet in self.red_agent_names:
+            agent_idx = self.red_agent_names.index(self.ball_at_feet)
             ball_pos = (
-                (self.red_agents[0].state.pos
+                (self.red_agents[agent_idx].state.pos
                  if env_index is None
-                 else self.red_agents[0].state.pos[env_index]
+                 else self.red_agents[agent_idx].state.pos[env_index]
                  )
                 - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
                 )

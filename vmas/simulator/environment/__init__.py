@@ -22,4 +22,4 @@ class Wrapper(Enum):
 
         elif self is self.ADE:
             from vmas.simulator.environment.agent_dict_env import AgentDictVMASWrapper
-            return AgentDictVMASWrapper(env, agent_ids=kwargs["agent_ids"])
+            return AgentDictVMASWrapper(env)

@@ -3,6 +3,7 @@ from vmas.simulator.environment.environment import Environment
 class AgentDictVMASWrapper:
     # metadata
     metadata = Environment.metadata
+    metadata["render_modes"] = metadata["render.modes"] # PettingZoo uses a different naming convention
 
     def __init__(self, env):
         self._env = env
@@ -40,4 +41,4 @@ class AgentDictVMASWrapper:
         return next(iter(self._env.observation_space.values()))
 
     def render(self, mode="human"):
-        ...
+        return self._env.render(mode=mode)

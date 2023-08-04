@@ -71,7 +71,6 @@ class Scenario(BaseScenario):
         self.max_red_agents = kwargs.get("max_n_red_agents", self.n_red_agents)
         # built-in AI
         self.builtin_ai_cfg = kwargs.get("builtin_ai", {})
-        import pdb; pdb.set_trace()
 
     def init_world(self, batch_dim: int, device: torch.device):
         # Make world
@@ -788,7 +787,6 @@ class Scenario(BaseScenario):
             return self._all_player_obs(agent)
 
     def _ego_only_obs(self, agent: Agent):
-        import pdb; pdb.set_trace()
         obs = torch.cat(
             [
                 agent.state.pos,

@@ -933,7 +933,6 @@ class AgentPolicy:
             dribble_speed=0.5,
             initial_vel_dist_behind_target_frac=0.3,
             ):
-        import pdb; pdb.set_trace()
         self.team_name = team
         self.otherteam_name = "Blue" if (self.team_name == "Red") else "Red"
 

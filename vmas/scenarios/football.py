@@ -69,6 +69,8 @@ class Scenario(BaseScenario):
         self.obs_mode = kwargs.get("obs_mode", "full")
         self.max_blue_agents = kwargs.get("max_n_blue_agents", self.n_blue_agents)
         self.max_red_agents = kwargs.get("max_n_red_agents", self.n_red_agents)
+        # built-in AI
+        self.builtin_ai_cfg = kwargs.get("builtin_ai", {})
 
     def init_world(self, batch_dim: int, device: torch.device):
         # Make world
@@ -89,8 +91,14 @@ class Scenario(BaseScenario):
 
     def init_agents(self, world):
         # Add agents
-        self.blue_controller = AgentPolicy(team="Blue")
-        self.red_controller = AgentPolicy(team="Red")
+        self.blue_controller = AgentPolicy(
+            team="Blue",
+            **self.builtin_ai_cfg
+            )
+        self.red_controller = AgentPolicy(
+            team="Red",
+            **self.builtin_ai_cfg
+            )
 
         blue_agents = []
         for i in range(self.n_blue_agents):
@@ -918,18 +926,25 @@ def ball_action_script(ball, world):
 
 
 class AgentPolicy:
-    def __init__(self, team="Red"):
+    def __init__(
+            self,
+            team="Red",
+            start_vel_mag=0.6,
+            dribble_speed=0.5,
+            initial_vel_dist_behind_target_frac=0.3,
+            ):
+        import pdb; pdb.set_trace()
         self.team_name = team
         self.otherteam_name = "Blue" if (self.team_name == "Red") else "Red"
 
         self.pos_lookahead = 0.01
         self.vel_lookahead = 0.01
-        self.start_vel_mag = 0.6
+        self.start_vel_mag = start_vel_mag
 
-        self.dribble_speed = 0.5
+        self.dribble_speed = dribble_speed
         self.dribble_slowdown_dist = 0.25
         self.dribble_stop_margin_vel_coeff = 0.1
-        self.initial_vel_dist_behind_target_frac = 0.3
+        self.initial_vel_dist_behind_target_frac = initial_vel_dist_behind_target_frac
         self.ball_pos_eps = 0.08
 
         self.max_shoot_time = 100

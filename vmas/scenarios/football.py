@@ -71,6 +71,7 @@ class Scenario(BaseScenario):
         self.max_red_agents = kwargs.get("max_n_red_agents", self.n_red_agents)
         # built-in AI
         self.builtin_ai_cfg = kwargs.get("builtin_ai", {})
+        import pdb; pdb.set_trace()
 
     def init_world(self, batch_dim: int, device: torch.device):
         # Make world
@@ -164,7 +165,7 @@ class Scenario(BaseScenario):
                 batch_index=env_index,
             )
         for agent in self.red_agents:
-            x,y,l,w = self.red_pos[agent]
+            x,y,l,w = self.red_pos[agent.name]
             agent.set_pos(
                 -torch.rand(
                     (1, self.world.dim_p)

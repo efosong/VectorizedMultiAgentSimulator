@@ -64,6 +64,7 @@ class Scenario(BaseScenario):
         self.red_pos = defaultdict(lambda: [-1.0, -1.0, 1.0, 2.0])
         self.red_pos.update(kwargs.get("red_pos", {}))
         self.ball_at_feet = kwargs.get("ball_at_feet", False)
+        self.ball_at_feet_max_rotation = kwargs.get("ball_at_feet_max_rotation", torch.pi/4)
         self.restrict_half = kwargs.get("restrict_half", False)
         # observation_mode
         self.obs_mode = kwargs.get("obs_mode", "full")
@@ -212,6 +213,12 @@ class Scenario(BaseScenario):
         self.ball = ball
 
     def reset_ball(self, env_index: int = None):
+        theta = self.ball_at_feet_max_rotation * (2*torch.rand(1)-1)
+        ball_displacement_vector = (self.ball_size+self.agent_size) * torch.Tensor(
+                [torch.cos(theta),
+                 torch.sin(theta)],
+                device=self.world.device
+            )
         if self.ball_at_feet == "blue":
             # Spawn at any blue agent's feet
             idx = torch.randint(len(self.blue_agents), (1,))
@@ -220,9 +227,8 @@ class Scenario(BaseScenario):
                  if env_index is None
                  else self.blue_agents[idx].state.pos[env_index]
                  )
-                + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                + ball_displacement_vector
                 )
-        #elif self.ball_at_feet == "blue_0":
         elif self.ball_at_feet in self.blue_agent_names:
             # Spawn at specific blue agent's feet
             agent_idx = self.blue_agent_names.index(self.ball_at_feet)
@@ -231,7 +237,7 @@ class Scenario(BaseScenario):
                  if env_index is None
                  else self.blue_agents[agent_idx].state.pos[env_index]
                  )
-                + torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                + ball_displacement_vector
                 )
         elif self.ball_at_feet == "red":
             idx = torch.randint(len(self.red_agents), (1,))
@@ -240,7 +246,7 @@ class Scenario(BaseScenario):
                  if env_index is None
                  else self.red_agents[idx].state.pos[env_index]
                  )
-                - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                - ball_displacement_vector
                 )
         elif self.ball_at_feet in self.red_agent_names:
             agent_idx = self.red_agent_names.index(self.ball_at_feet)
@@ -249,7 +255,7 @@ class Scenario(BaseScenario):
                  if env_index is None
                  else self.red_agents[agent_idx].state.pos[env_index]
                  )
-                - torch.Tensor([self.ball_size+self.agent_size, 0], device=self.world.device)
+                - ball_displacement_vector
                 )
         else:
             ball_pos = torch.zeros(2, device=self.world.device)

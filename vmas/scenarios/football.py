@@ -213,12 +213,19 @@ class Scenario(BaseScenario):
         self.ball = ball
 
     def reset_ball(self, env_index: int = None):
-        theta = self.ball_at_feet_max_rotation * (2*torch.rand(1)-1)
-        ball_displacement_vector = (self.ball_size+self.agent_size) * torch.Tensor(
-                [torch.cos(theta),
-                 torch.sin(theta)],
-                device=self.world.device
-            )
+        if env_index is None:
+            theta = self.ball_at_feet_max_rotation * (2*torch.rand(self.world.batch_dim, device=self.world.device)-1)
+            ball_displacement_vector = (self.ball_size+self.agent_size) * torch.vstack(
+                    [torch.cos(theta),
+                     torch.sin(theta)]
+                ).T
+        else:
+            theta = self.ball_at_feet_max_rotation * (2*torch.rand(1, device=self.world.device)-1)
+            ball_displacement_vector = (self.ball_size+self.agent_size) * torch.Tensor(
+                    [torch.cos(theta),
+                     torch.sin(theta)],
+                    device=self.world.device
+                )
         if self.ball_at_feet == "blue":
             # Spawn at any blue agent's feet
             idx = torch.randint(len(self.blue_agents), (1,))

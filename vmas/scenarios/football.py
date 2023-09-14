@@ -12,6 +12,12 @@ from vmas.simulator.core import Agent, World, Landmark, Sphere, Box, Line
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, X, Y
 
+RENDER_DOE = True
+if RENDER_DOE:
+    import matplotlib as mpl
+    colormap = mpl.colormaps["winter"]
+    from fst.agents.doe_classifier import VMASBallPosClassifier
+    classifier = VMASBallPosClassifier(["LB", "RB", "LF", "RF"])
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
@@ -860,7 +866,11 @@ class Scenario(BaseScenario):
                 self.ball.state.vel - agent.state.vel,
             ]
         )
-        return torch.cat(obs, dim=1)
+
+        obs = torch.cat(obs, dim=1)
+        if RENDER_DOE:
+            agent.color = colormap(classifier.is_doe(obs, agent.name).item())[0:3]
+        return obs
 
     def done(self):
         if self.ai_blue_agents and self.ai_red_agents:

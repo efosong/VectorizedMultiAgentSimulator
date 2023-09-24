@@ -37,7 +37,6 @@ class EPyMARLVMAS(gym.Env):
         obs, rews, done, infos = self._env.step(action)
         dones = [done] * self.n_agents
         info = infos[0]
-        print("x")
         return obs,rews,dones,info
 
     def reset(self):

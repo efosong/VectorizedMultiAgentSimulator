@@ -11,10 +11,11 @@ class EPyMARLVMAS(gym.Env):
         super().__init__()
         self._env = vmas.make_env(
                 scenario="football",
-                num_envs=1,
+                num_envs=256,
                 device="cpu",
                 continuous_actions=False,
-                wrapper=vmas.Wrapper.GYM,
+                #wrapper=vmas.Wrapper.GYM,
+                wrapper=None,
                 max_steps=1024,
                 dict_spaces=False,
                 **kwargs,
@@ -32,12 +33,13 @@ class EPyMARLVMAS(gym.Env):
             for space in self._env.action_space
         ))
         self.n_agents = len(self.action_space)
+        self.num_envs = self._env.num_envs
 
     def step(self, action):
-        obs, rews, done, infos = self._env.step(action)
-        dones = [done] * self.n_agents
+        obs, rews, term, trunc,infos = self._env.step(action)
         info = infos[0]
-        return obs,rews,dones,info
+        # TODO currently just treat termination & truncation the same way.
+        return obs,rews,term|trunc,info
 
     def reset(self):
         return self._env.reset()
@@ -46,7 +48,6 @@ for pitch_length in pitch_lengths:
     register(
         id=f"VMASFootball-{pitch_length}-v0",
         entry_point="vmas.gym:EPyMARLVMAS",
-        max_episode_steps=1024,
         #autoreset=True,
         kwargs = {
             "obs_mode": "full",

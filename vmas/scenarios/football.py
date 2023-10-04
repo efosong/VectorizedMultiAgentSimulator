@@ -12,7 +12,7 @@ from vmas.simulator.core import Agent, World, Landmark, Sphere, Box, Line
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, X, Y
 
-RENDER_DOE = True
+RENDER_DOE = False
 if RENDER_DOE:
     import matplotlib as mpl
     colormap = mpl.colormaps["winter"]
@@ -1560,15 +1560,12 @@ class AgentPolicy:
         )
         return best_pos[0, :, :]
 
+    @torch.compile
     def get_angle_interval(
-        self, pos, obj, objpos=None, beams=128, env_index=slice(None)
+        self, pos, obj, objpos=None, beams=128, env_index=slice(None), is_net=False, is_sphere=False,
     ):
-        # agent_pos = agent.state.pos[env_index]
-        if objpos is not None:
-            obj_pos = objpos
-        else:
-            obj_pos = obj.state.pos[env_index]
-        if obj == self.target_net or obj == self.own_net:
+        obj_pos = objpos
+        if is_net:
             left_goal_mask = obj_pos[:, X] < 0
             inner_centre = obj_pos.clone()
             inner_centre[:, X] += (
@@ -1578,7 +1575,7 @@ class AgentPolicy:
             obj_side1[:, Y] += self.world.goal_size / 2
             obj_side2 = inner_centre.clone()
             obj_side2[:, Y] += -self.world.goal_size / 2
-        elif isinstance(obj.shape, Sphere):
+        elif is_sphere:
             centre_disp = obj_pos - pos
             centre_dist = centre_disp.norm(dim=-1)
             centre_disp[centre_dist == 0] = torch.tensor(
@@ -1651,12 +1648,22 @@ class AgentPolicy:
 
     def get_lane_value(self, pos, agent, opposition=False, env_index=slice(None)):
         if not opposition:
-            ball_angles, lidar_angles = self.get_angle_interval(pos, self.ball)
+            ball_angles, lidar_angles = self.get_angle_interval(
+                    pos, self.ball,
+                    objpos=self.ball.state.pos,
+                    is_net=False, is_sphere=True,
+                    )
             goal_angles, _ = self.get_angle_interval(
-                pos, self.target_net, env_index=env_index
+                pos, self.target_net, env_index=env_index,
+                objpos=self.target_net.state.pos[env_index],
+                is_net=True, is_sphere=False,
             )
             blocking_angles_list = [
-                self.get_angle_interval(pos, otheragent, env_index=env_index)[0]
+                self.get_angle_interval(
+                    pos, otheragent, env_index=env_index,
+                    objpos=otheragent.state.pos[env_index],
+                    is_net=False, is_sphere=True,
+                    )[0]
                 for otheragent in self.teammates + self.opposition
                 if (otheragent != agent)
             ]
@@ -1673,11 +1680,15 @@ class AgentPolicy:
             for opp_agent in self.opposition:
                 opp_agent_pos = opp_agent.state.pos[env_index]
                 opp_desired_angles = self.get_angle_interval(
-                    opp_agent_pos, self.own_net, env_index=env_index
+                    opp_agent_pos, self.own_net, env_index=env_index,
+                    objpos=self.own_net.state.pos[env_index],
+                    is_net=True, is_sphere=False,
                 )[0]
                 opp_blocking_angles_list = [
                     self.get_angle_interval(
-                        opp_agent_pos, otheragent, objpos=pos, env_index=env_index
+                        opp_agent_pos, otheragent,
+                        objpos=pos, env_index=env_index,
+                        is_net=False, is_sphere=True,
                     )[0]
                     for otheragent in self.teammates
                 ]
@@ -1745,11 +1756,15 @@ class AgentPolicy:
         # Angle
         beams = 128
         goal_angles, lidar_angles = self.get_angle_interval(
-            ball_pos, self.target_net, beams=beams, env_index=env_index
+            ball_pos, self.target_net, beams=beams, env_index=env_index,
+            objpos=self.target_net.state.pos[env_index],
+            is_net=True, is_sphere=False,
         )
         blocking_angles_list = [
             self.get_angle_interval(
-                ball_pos, otheragent, beams=beams, env_index=env_index
+                ball_pos, otheragent, beams=beams, env_index=env_index,
+                objpos=otheragent.state.pos[env_index],
+                is_net=False, is_sphere=True,
             )[0]
             for otheragent in self.teammates + self.opposition
             if (otheragent != agent)
@@ -1811,11 +1826,15 @@ class AgentPolicy:
         # Angle
         beams = 128
         goal_angles, lidar_angles = self.get_angle_interval(
-            ball_pos, agent_dest, beams=beams, env_index=env_index
+            ball_pos, agent_dest, beams=beams, env_index=env_index,
+            objpos=agent_dest.state.pos[env_index],
+            is_net=False, is_sphere=isinstance(agent_dest.shape, Sphere),
         )
         blocking_angles_list = [
             self.get_angle_interval(
-                ball_pos, otheragent, beams=beams, env_index=env_index
+                ball_pos, otheragent, beams=beams, env_index=env_index,
+                objpos=otheragent.state.pos[env_index],
+                is_net=False, is_sphere=True,
             )[0]
             for otheragent in self.teammates + self.opposition
             if (otheragent != agent_dest)
